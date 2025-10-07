@@ -3,9 +3,12 @@ const School = require('../models/School');
 const { generateToken } = require('../middleware/auth');
 const { validationResult } = require('express-validator');
 
-// @desc    Register new user
+// Admin Registration Secret Code
+const ADMIN_SECRET_CODE = 'SPARK2024_ADMIN_SECRET';
+
+// @desc    Register new admin (Master Portal)
 // @route   POST /api/auth/register
-// @access  Public (for admin registration)
+// @access  Public (requires secret code)
 const register = async (req, res) => {
   try {
     // Check for validation errors
@@ -18,7 +21,15 @@ const register = async (req, res) => {
       });
     }
 
-    const { name, email, password, phone, role = 'admin', schoolId } = req.body;
+    const { name, email, password, secretCode } = req.body;
+
+    // Verify secret code
+    if (!secretCode || secretCode !== ADMIN_SECRET_CODE) {
+      return res.status(403).json({
+        success: false,
+        error: 'Invalid secret code. Only authorized personnel can register as admin.'
+      });
+    }
 
     // Check if user already exists
     const existingUser = await User.findOne({ email: email.toLowerCase() });
@@ -29,14 +40,13 @@ const register = async (req, res) => {
       });
     }
 
-    // Create user
+    // Create admin user (no schoolId, only admin role)
     const user = await User.create({
       name,
       email: email.toLowerCase(),
       password,
-      phone,
-      role,
-      schoolId
+      role: 'admin', // Always admin for master portal registration
+      schoolId: null // Admin users don't belong to any specific school
     });
 
     // Generate token
