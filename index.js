@@ -149,6 +149,18 @@ if (process.env.NODE_ENV === 'development') {
   app.use(morgan('combined'));
 }
 
+// Root endpoint for health checks (handles both GET and HEAD)
+app.all('/', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    message: 'Master Portal Backend API',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV,
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
