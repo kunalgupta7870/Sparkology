@@ -1,13 +1,13 @@
-const Photo = require('../models/Photo');
+const FactOfTheDay = require('../models/Photo');
 const { uploadToCloudinary } = require('../utils/cloudinary');
 const asyncHandler = require('../middleware/asyncHandler');
 
-// @desc    Upload a photo
+// @desc    Upload a fact
 // @route   POST /api/photos/upload
 // @access  Private (Admin)
 const uploadPhoto = asyncHandler(async (req, res) => {
   try {
-    console.log('📸 Photo upload request received');
+    console.log('💡 Fact upload request received');
     console.log('   File:', req.file);
     console.log('   Body:', req.body);
     console.log('   User:', req.user?.email);
@@ -32,15 +32,15 @@ const uploadPhoto = asyncHandler(async (req, res) => {
     if (req.file.size > 25 * 1024 * 1024) { // 25MB
       return res.status(413).json({
         success: false,
-        message: 'File too large. Maximum size is 25MB for photos.'
+        message: 'File too large. Maximum size is 25MB for facts.'
       });
     }
 
     const { title, description, category, tags } = req.body;
     const user = req.user;
 
-    // Create photo document
-    const photoData = {
+    // Create fact document
+    const factData = {
       title: title || req.file.originalname,
       description: description || '',
       imageUrl: req.file.path,
@@ -58,23 +58,23 @@ const uploadPhoto = asyncHandler(async (req, res) => {
     
     // Only add schoolId if user has one (admin users don't have schoolId)
     if (user.schoolId || user.school_id) {
-      photoData.schoolId = user.schoolId || user.school_id;
+      factData.schoolId = user.schoolId || user.school_id;
     }
 
     console.log('   💾 Saving to database...');
-    const photo = await Photo.create(photoData);
-    console.log('   ✅ Photo saved to database:', photo._id);
+    const fact = await FactOfTheDay.create(factData);
+    console.log('   ✅ Fact saved to database:', fact._id);
 
     res.status(201).json({
       success: true,
-      message: 'Photo uploaded successfully',
-      data: photo
+      message: 'Fact uploaded successfully',
+      data: fact
     });
   } catch (error) {
-    console.error('Photo upload error:', error);
+    console.error('Fact upload error:', error);
     res.status(500).json({
       success: false,
-      message: 'Photo upload failed',
+      message: 'Fact upload failed',
       error: error.message
     });
   }
@@ -123,14 +123,14 @@ const getPhotos = asyncHandler(async (req, res) => {
       query.tags = { $in: tagArray };
     }
 
-    const photos = await Photo.find(query)
+    const photos = await FactOfTheDay.find(query)
       .populate('uploadedBy', 'name email')
       .populate('schoolId', 'name')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
 
-    const total = await Photo.countDocuments(query);
+    const total = await FactOfTheDay.countDocuments(query);
 
     res.json({
       success: true,
@@ -156,20 +156,20 @@ const getPhotos = asyncHandler(async (req, res) => {
 // @access  Private (Admin)
 const getPhoto = asyncHandler(async (req, res) => {
   try {
-    const photo = await Photo.findById(req.params.id)
+    const fact = await FactOfTheDay.findById(req.params.id)
       .populate('uploadedBy', 'name email')
       .populate('schoolId', 'name');
 
-    if (!photo) {
+    if (!fact) {
       return res.status(404).json({
         success: false,
-        message: 'Photo not found'
+        message: 'Fact not found'
       });
     }
 
-    // Check if user has access to this photo
+    // Check if user has access to this fact
     const user = req.user;
-    if (user.role !== 'admin' && photo.schoolId.toString() !== (user.schoolId || user.school_id).toString()) {
+    if (user.role !== 'admin' && fact.schoolId && fact.schoolId.toString() !== (user.schoolId || user.school_id).toString()) {
       return res.status(403).json({
         success: false,
         message: 'Access denied'
@@ -177,17 +177,17 @@ const getPhoto = asyncHandler(async (req, res) => {
     }
 
     // Increment view count
-    await photo.incrementViewCount();
+    await fact.incrementViewCount();
 
     res.json({
       success: true,
-      data: photo
+      data: fact
     });
   } catch (error) {
-    console.error('Get photo error:', error);
+    console.error('Get fact error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch photo',
+      message: 'Failed to fetch fact',
       error: error.message
     });
   }
@@ -201,17 +201,17 @@ const updatePhoto = asyncHandler(async (req, res) => {
     const { title, description, category, tags, isPublic } = req.body;
     const user = req.user;
 
-    const photo = await Photo.findById(req.params.id);
+    const fact = await FactOfTheDay.findById(req.params.id);
 
-    if (!photo) {
+    if (!fact) {
       return res.status(404).json({
         success: false,
-        message: 'Photo not found'
+        message: 'Fact not found'
       });
     }
 
-    // Check if user has access to this photo
-    if (user.role !== 'admin' && photo.schoolId.toString() !== (user.schoolId || user.school_id).toString()) {
+    // Check if user has access to this fact
+    if (user.role !== 'admin' && fact.schoolId && fact.schoolId.toString() !== (user.schoolId || user.school_id).toString()) {
       return res.status(403).json({
         success: false,
         message: 'Access denied'
@@ -219,24 +219,24 @@ const updatePhoto = asyncHandler(async (req, res) => {
     }
 
     // Update fields
-    if (title) photo.title = title;
-    if (description !== undefined) photo.description = description;
-    if (category) photo.category = category;
-    if (tags) photo.tags = Array.isArray(tags) ? tags : tags.split(',');
-    if (isPublic !== undefined) photo.isPublic = isPublic;
+    if (title) fact.title = title;
+    if (description !== undefined) fact.description = description;
+    if (category) fact.category = category;
+    if (tags) fact.tags = Array.isArray(tags) ? tags : tags.split(',');
+    if (isPublic !== undefined) fact.isPublic = isPublic;
 
-    await photo.save();
+    await fact.save();
 
     res.json({
       success: true,
-      message: 'Photo updated successfully',
-      data: photo
+      message: 'Fact updated successfully',
+      data: fact
     });
   } catch (error) {
-    console.error('Update photo error:', error);
+    console.error('Update fact error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to update photo',
+      message: 'Failed to update fact',
       error: error.message
     });
   }
@@ -249,17 +249,17 @@ const deletePhoto = asyncHandler(async (req, res) => {
   try {
     const user = req.user;
 
-    const photo = await Photo.findById(req.params.id);
+    const fact = await FactOfTheDay.findById(req.params.id);
 
-    if (!photo) {
+    if (!fact) {
       return res.status(404).json({
         success: false,
-        message: 'Photo not found'
+        message: 'Fact not found'
       });
     }
 
-    // Check if user has access to this photo
-    if (user.role !== 'admin' && photo.schoolId.toString() !== (user.schoolId || user.school_id).toString()) {
+    // Check if user has access to this fact
+    if (user.role !== 'admin' && fact.schoolId && fact.schoolId.toString() !== (user.schoolId || user.school_id).toString()) {
       return res.status(403).json({
         success: false,
         message: 'Access denied'
@@ -267,9 +267,9 @@ const deletePhoto = asyncHandler(async (req, res) => {
     }
 
     // Delete from Cloudinary
-    if (photo.cloudinaryId) {
+    if (fact.cloudinaryId) {
       try {
-        await uploadToCloudinary.deleteResource(photo.cloudinaryId);
+        await uploadToCloudinary.deleteResource(fact.cloudinaryId);
       } catch (cloudinaryError) {
         console.error('Cloudinary delete error:', cloudinaryError);
         // Continue with database deletion even if Cloudinary deletion fails
@@ -277,17 +277,17 @@ const deletePhoto = asyncHandler(async (req, res) => {
     }
 
     // Delete from database
-    await Photo.findByIdAndDelete(req.params.id);
+    await FactOfTheDay.findByIdAndDelete(req.params.id);
 
     res.json({
       success: true,
-      message: 'Photo deleted successfully'
+      message: 'Fact deleted successfully'
     });
   } catch (error) {
-    console.error('Delete photo error:', error);
+    console.error('Delete fact error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to delete photo',
+      message: 'Failed to delete fact',
       error: error.message
     });
   }
@@ -306,23 +306,23 @@ const getPhotoCategories = asyncHandler(async (req, res) => {
       query.schoolId = user.schoolId || user.school_id;
     }
 
-    const categories = await Photo.distinct('category', query);
+    const categories = await FactOfTheDay.distinct('category', query);
 
     res.json({
       success: true,
       data: categories
     });
   } catch (error) {
-    console.error('Get photo categories error:', error);
+    console.error('Get fact categories error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch photo categories',
+      message: 'Failed to fetch fact categories',
       error: error.message
     });
   }
 });
 
-// @desc    Get photo tags
+// @desc    Get fact tags
 // @route   GET /api/photos/tags
 // @access  Private (Admin)
 const getPhotoTags = asyncHandler(async (req, res) => {
@@ -335,17 +335,17 @@ const getPhotoTags = asyncHandler(async (req, res) => {
       query.schoolId = user.schoolId || user.school_id;
     }
 
-    const tags = await Photo.distinct('tags', query);
+    const tags = await FactOfTheDay.distinct('tags', query);
 
     res.json({
       success: true,
       data: tags
     });
   } catch (error) {
-    console.error('Get photo tags error:', error);
+    console.error('Get fact tags error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch photo tags',
+      message: 'Failed to fetch fact tags',
       error: error.message
     });
   }

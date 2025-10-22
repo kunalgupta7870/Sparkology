@@ -3,6 +3,7 @@ const Student = require('../models/Student');
 const Schedule = require('../models/Schedule');
 const Assignment = require('../models/Assignment');
 const Attendance = require('../models/Attendance');
+const asyncHandler = require('../middleware/asyncHandler');
 
 // @desc    Get parent profile
 // @route   GET /api/parents/profile
@@ -530,6 +531,45 @@ const getChildTeachers = async (req, res) => {
   }
 };
 
+// @desc    Get all parents by school
+// @route   GET /api/parents
+// @access  Private (School Admin)
+const getAllParents = asyncHandler(async (req, res) => {
+  const { schoolId } = req.query;
+  
+  if (!schoolId) {
+    return res.status(400).json({
+      success: false,
+      error: 'School ID is required'
+    });
+  }
+
+  const parents = await Parent.find({ schoolId, isActive: true })
+    .populate({
+      path: 'studentIds',
+      select: 'name rollNumber classId address',
+      populate: {
+        path: 'classId',
+        select: 'name section'
+      }
+    })
+    .populate({
+      path: 'studentId',
+      select: 'name rollNumber classId address',
+      populate: {
+        path: 'classId',
+        select: 'name section'
+      }
+    })
+    .sort({ name: 1 });
+
+  res.status(200).json({
+    success: true,
+    count: parents.length,
+    data: parents
+  });
+});
+
 module.exports = {
   getParentProfile,
   getParentChildren,
@@ -537,5 +577,6 @@ module.exports = {
   getChildSchedule,
   getChildAttendance,
   getChildAssignments,
-  getChildTeachers
+  getChildTeachers,
+  getAllParents
 };

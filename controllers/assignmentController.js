@@ -4,6 +4,9 @@ const Subject = require('../models/Subject');
 const Student = require('../models/Student');
 const Notification = require('../models/Notification');
 const { validationResult } = require('express-validator');
+const { uploadDocument, uploadToCloudinary } = require('../utils/cloudinary');
+const fs = require('fs');
+const path = require('path');
 
 // WebSocket instance (will be injected)
 let io = null;
@@ -45,6 +48,7 @@ const getAssignments = async (req, res) => {
       .populate('classId', 'name section room')
       .populate('subjectId', 'name code')
       .populate('teacherId', 'name email')
+      .populate('submissions.studentId', 'name rollNumber')
       .sort({ dueDate: -1, createdAt: -1 });
 
     // Add submission count for each assignment
@@ -164,14 +168,8 @@ const getAssignment = async (req, res) => {
 // @access  Private (Teacher, School Admin)
 const createAssignment = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        error: 'Validation failed',
-        details: errors.array()
-      });
-    }
+    // Skip express-validator for multipart form data
+    // We'll do manual validation instead
 
     const {
       title,
@@ -181,7 +179,8 @@ const createAssignment = async (req, res) => {
       dueDate,
       dueTime,
       attachments,
-      totalMarks
+      totalMarks,
+      points
     } = req.body;
 
     console.log('📥 Backend: Received assignment data:', {
@@ -192,8 +191,20 @@ const createAssignment = async (req, res) => {
       dueDate,
       dueTime,
       attachments,
-      totalMarks
+      totalMarks,
+      points,
+      files: req.files?.length || 0
     });
+    
+    console.log('📥 Backend: req.files details:', JSON.stringify(req.files, null, 2));
+
+    // Manual validation
+    if (!title || !description || !classId || !subjectId || !dueDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: title, description, classId, subjectId, and dueDate are required'
+      });
+    }
 
     const schoolId = req.user.schoolId;
     const teacherId = req.user._id;
@@ -221,7 +232,37 @@ const createAssignment = async (req, res) => {
       });
     }
 
-    // Create assignment
+    // Prepare attachments from uploaded files (Local Storage)
+    const fileAttachments = [];
+    if (req.files && req.files.length > 0) {
+      console.log('📎 Backend: Processing', req.files.length, 'files');
+      
+      req.files.forEach((file, index) => {
+        console.log(`📎 Backend: File ${index}:`, {
+          originalname: file.originalname,
+          filename: file.filename,
+          path: file.path,
+          size: file.size
+        });
+        
+        // Use local file path
+        const fileUrl = `/uploads/documents/${file.filename}`;
+        
+        console.log(`📎 Backend: Local file URL: ${fileUrl}`);
+        
+        fileAttachments.push({
+          name: file.originalname,
+          url: fileUrl, // Local file URL
+          type: 'pdf',
+          size: file.size,
+          localPath: file.path // Store full local path for deletion
+        });
+      });
+      
+      console.log('📎 Backend: Prepared attachments array:', JSON.stringify(fileAttachments, null, 2));
+    }
+
+    // Create assignment - Build data object carefully
     const assignmentData = {
       title,
       description,
@@ -231,14 +272,32 @@ const createAssignment = async (req, res) => {
       schoolId,
       dueDate,
       dueTime,
-      attachments: attachments || [],
-      totalMarks: totalMarks || 0,
+      totalMarks: parseInt(totalMarks) || 0,
+      points: parseInt(points) || 0,
       createdBy: teacherId
     };
+    
+    // Add attachments separately to avoid any stringification
+    if (fileAttachments.length > 0) {
+      assignmentData.attachments = fileAttachments;
+    } else if (attachments) {
+      assignmentData.attachments = attachments;
+    } else {
+      assignmentData.attachments = [];
+    }
 
-    console.log('💾 Backend: Creating assignment with data:', assignmentData);
-    const assignment = await Assignment.create(assignmentData);
-    console.log('✅ Backend: Assignment created successfully:', assignment);
+    console.log('💾 Backend: Assignment data type check:', {
+      attachmentsIsArray: Array.isArray(assignmentData.attachments),
+      attachmentsLength: assignmentData.attachments?.length,
+      attachmentsType: typeof assignmentData.attachments,
+      firstAttachment: assignmentData.attachments[0]
+    });
+    
+    // Use new Assignment() instead of create() to avoid casting issues
+    const assignment = new Assignment(assignmentData);
+    await assignment.save();
+    
+    console.log('✅ Backend: Assignment created successfully with ID:', assignment._id);
 
     // Populate the created assignment
     await assignment.populate([
@@ -453,7 +512,48 @@ const deleteAssignment = async (req, res) => {
       });
     }
 
+    // Clean up local files
+    const filesToDelete = [];
+    
+    // Collect all local file paths
+    if (assignment.attachments) {
+      assignment.attachments.forEach(attachment => {
+        if (attachment.localPath) {
+          filesToDelete.push(attachment.localPath);
+        }
+      });
+    }
+    
+    if (assignment.submissions) {
+      assignment.submissions.forEach(submission => {
+        if (submission.attachments) {
+          submission.attachments.forEach(attachment => {
+            if (attachment.localPath) {
+              filesToDelete.push(attachment.localPath);
+            }
+          });
+        }
+      });
+    }
+    
+    // Delete assignment from database
     await Assignment.findByIdAndDelete(req.params.id);
+
+    // Clean up local files
+    if (filesToDelete.length > 0) {
+      filesToDelete.forEach(filePath => {
+        try {
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            console.log(`✅ Deleted local file: ${filePath}`);
+          }
+        } catch (fileError) {
+          console.error(`Error deleting file ${filePath}:`, fileError);
+          // Don't fail the deletion if file cleanup fails
+        }
+      });
+      console.log(`✅ Cleaned up ${filesToDelete.length} local files for assignment ${req.params.id}`);
+    }
 
     res.status(200).json({
       success: true,
@@ -523,6 +623,425 @@ const getTeacherClasses = async (req, res) => {
   }
 };
 
+// @desc    Submit assignment (Student)
+// @route   POST /api/assignments/:id/submit
+// @access  Private (Student)
+const submitAssignment = async (req, res) => {
+  try {
+    const assignmentId = req.params.id;
+    const studentId = req.user._id;
+
+    // Find the assignment
+    const assignment = await Assignment.findById(assignmentId)
+      .populate('subjectId', 'name')
+      .populate('classId', 'name');
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        error: 'Assignment not found'
+      });
+    }
+
+    // Check if student is in the same class
+    const student = await Student.findById(studentId);
+    if (!student || student.classId.toString() !== assignment.classId._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        error: 'You are not authorized to submit this assignment'
+      });
+    }
+
+    // Check if student has already submitted
+    const existingSubmission = assignment.submissions.find(
+      sub => sub.studentId.toString() === studentId.toString()
+    );
+    
+    console.log(`📝 Backend: Checking submission for student ${studentId}, assignment ${assignmentId}`);
+    console.log(`📝 Backend: Existing submission:`, existingSubmission ? {
+      status: existingSubmission.status,
+      submittedAt: existingSubmission.submittedAt
+    } : 'none');
+    
+    if (existingSubmission && existingSubmission.status !== 'pending') {
+      console.log(`📝 Backend: Student has already submitted this assignment with status: ${existingSubmission.status}`);
+      return res.status(400).json({
+        success: false,
+        error: 'Assignment already submitted. You cannot submit this assignment again.',
+        alreadySubmitted: true,
+        submission: {
+          submittedAt: existingSubmission.submittedAt,
+          status: existingSubmission.status,
+          marks: existingSubmission.marks,
+          feedback: existingSubmission.feedback
+        }
+      });
+    }
+
+    // Prepare attachments from uploaded files (Local Storage)
+    const attachments = [];
+    if (req.files && req.files.length > 0) {
+      req.files.forEach(file => {
+        const fileUrl = `/uploads/documents/${file.filename}`;
+        attachments.push({
+          name: file.originalname,
+          url: fileUrl, // Local file URL
+          type: 'pdf',
+          size: file.size,
+          localPath: file.path // Store full local path for deletion
+        });
+      });
+    }
+
+    // Add submission to assignment
+    await assignment.addSubmission(studentId, attachments);
+
+    // Award points to student
+    const isLate = new Date() > assignment.dueDate;
+    await student.addPoints(
+      assignmentId,
+      isLate ? Math.floor(assignment.points * 0.5) : assignment.points,
+      assignment.title,
+      assignment.subjectId.name,
+      isLate
+    );
+
+    // Create notification for teacher
+    await Notification.create({
+      title: 'New Assignment Submission',
+      message: `${student.name} submitted assignment: ${assignment.title}`,
+      type: 'assignment_submission',
+      recipient: assignment.teacherId,
+      recipientModel: 'User',
+      sender: studentId,
+      schoolId: assignment.schoolId,
+      relatedId: assignmentId,
+      relatedType: 'assignment',
+      isRead: false,
+      priority: 'high',
+      icon: 'checkmark-circle',
+      color: '#10B981'
+    });
+
+    // Emit real-time notification and submission update
+    if (io) {
+      const teacherRoom = `user_${assignment.teacherId.toString()}`;
+      
+      console.log(`📢 Backend: Preparing to emit to teacher room: ${teacherRoom}`);
+      console.log(`📢 Backend: Teacher ID: ${assignment.teacherId.toString()}`);
+      console.log(`📢 Backend: Student: ${student.name}`);
+      console.log(`📢 Backend: Assignment: ${assignment.title}`);
+      
+      // Check if the room exists and has clients
+      const roomClients = io.sockets.adapter.rooms.get(teacherRoom);
+      console.log(`📢 Backend: Room "${teacherRoom}" has ${roomClients ? roomClients.size : 0} clients`);
+      if (roomClients) {
+        console.log(`📢 Backend: Clients in room:`, Array.from(roomClients));
+      }
+      
+      // Emit notification
+      io.to(teacherRoom).emit('new_notification', {
+        success: true,
+        notification: {
+          title: 'New Assignment Submission',
+          message: `${student.name} submitted assignment: ${assignment.title}`,
+          type: 'assignment_submission'
+        }
+      });
+      
+      // Get updated assignment with submission count
+      const updatedAssignment = await Assignment.findById(assignmentId)
+        .populate('classId', 'name section room')
+        .populate('subjectId', 'name code')
+        .populate('teacherId', 'name email');
+      
+      const totalStudents = await Student.countDocuments({ 
+        classId: updatedAssignment.classId._id,
+        status: 'active'
+      });
+      
+      const submittedCount = updatedAssignment.submissions.filter(
+        s => s.status !== 'pending'
+      ).length;
+      
+      // Emit assignment submission event with full updated data
+      io.to(teacherRoom).emit('assignment_submitted', {
+        success: true,
+        assignmentId: assignmentId,
+        studentId: studentId,
+        studentName: student.name,
+        submittedAt: new Date(),
+        pointsEarned: isLate ? Math.floor(assignment.points * 0.5) : assignment.points,
+        isLate: isLate,
+        assignment: {
+          ...updatedAssignment.toObject(),
+          submissionCount: submittedCount,
+          totalStudents: totalStudents
+        }
+      });
+      
+      console.log(`📢 Backend: ✅ ✅ ✅ Emitted assignment_submitted event to teacher room: ${teacherRoom}`);
+      console.log(`📢 Backend: Event data:`, {
+        assignmentId,
+        studentName: student.name,
+        pointsEarned: isLate ? Math.floor(assignment.points * 0.5) : assignment.points
+      });
+      
+      // Also broadcast to all connected clients as a test
+      io.emit('test_broadcast', {
+        message: `Student ${student.name} submitted assignment - broadcast test`,
+        teacherRoom: teacherRoom
+      });
+      console.log(`📢 Backend: Also sent test broadcast to ALL clients`);
+      
+    } else {
+      console.log(`❌ Backend: io is not available, cannot emit events`);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Assignment submitted successfully',
+      data: {
+        pointsEarned: isLate ? Math.floor(assignment.points * 0.5) : assignment.points,
+        isLate: isLate,
+        submissionTime: new Date()
+      }
+    });
+
+  } catch (error) {
+    console.error('Submit assignment error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while submitting assignment'
+    });
+  }
+};
+
+// @desc    Get student's assignment submissions
+// @route   GET /api/assignments/my-submissions
+// @access  Private (Student)
+const getMySubmissions = async (req, res) => {
+  try {
+    const studentId = req.user._id;
+
+    const assignments = await Assignment.find({
+      'submissions.studentId': studentId
+    })
+      .populate('classId', 'name section')
+      .populate('subjectId', 'name code')
+      .populate('teacherId', 'name email')
+      .sort({ dueDate: -1 });
+
+    // Return flat structure with assignmentId for easier frontend checking
+    const submissions = [];
+    
+    assignments.forEach(assignment => {
+      const submission = assignment.submissions.find(
+        s => s.studentId.toString() === studentId.toString()
+      );
+
+      // Only include non-pending submissions (actually submitted)
+      if (submission && submission.status !== 'pending') {
+        submissions.push({
+          _id: submission._id,
+          assignmentId: assignment._id, // This is what frontend checks
+          submittedAt: submission.submittedAt,
+          files: submission.attachments || [],
+          attachments: submission.attachments || [],
+          pointsEarned: submission.pointsEarned,
+          marks: submission.marks,
+          feedback: submission.feedback,
+          status: submission.status
+        });
+      }
+    });
+
+    console.log(`📝 Backend: Returning ${submissions.length} submissions for student ${studentId}`);
+    console.log(`📝 Backend: Submissions:`, submissions.map(s => ({
+      id: s._id,
+      assignmentId: s.assignmentId,
+      status: s.status
+    })));
+
+    res.status(200).json({
+      success: true,
+      count: submissions.length,
+      data: submissions
+    });
+
+  } catch (error) {
+    console.error('Get my submissions error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while fetching submissions'
+    });
+  }
+};
+
+// @desc    Get assignments for a specific child (Parent access)
+// @route   GET /api/assignments/child/:childId
+// @access  Private (Parent)
+const getChildAssignments = async (req, res) => {
+  try {
+    const { childId } = req.params;
+    const parentId = req.user._id;
+    const schoolId = req.user.schoolId;
+
+    // Verify the child belongs to this parent
+    const Parent = require('../models/Parent');
+    const Student = require('../models/Student');
+    
+    const parent = await Parent.findById(parentId);
+    if (!parent) {
+      return res.status(404).json({
+        success: false,
+        error: 'Parent not found'
+      });
+    }
+
+    // Get all student IDs (support both old and new schema)
+    let studentIds = [];
+    if (parent.studentIds && parent.studentIds.length > 0) {
+      studentIds = parent.studentIds.map(id => id.toString());
+    } else if (parent.studentId) {
+      studentIds = [parent.studentId.toString()];
+    }
+
+    // Check if the requested child ID is one of the parent's children
+    if (!studentIds.includes(childId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. You can only view your own child\'s assignments.'
+      });
+    }
+
+    const child = await Student.findById(childId);
+    if (!child || !child.classId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Child not found or not assigned to any class'
+      });
+    }
+
+    // Get assignments for the child's class
+    const assignments = await Assignment.find({
+      classId: child.classId,
+      schoolId: schoolId,
+      status: 'active'
+    })
+    .populate('subjectId', 'name')
+    .populate('classId', 'name')
+    .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      data: assignments
+    });
+  } catch (error) {
+    console.error('Error fetching child assignments:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while fetching child assignments'
+    });
+  }
+};
+
+// @desc    Get assignment submissions for a specific child (Parent access)
+// @route   GET /api/assignments/child/:childId/submissions
+// @access  Private (Parent)
+const getChildAssignmentSubmissions = async (req, res) => {
+  try {
+    const { childId } = req.params;
+    const parentId = req.user._id;
+    const schoolId = req.user.schoolId;
+
+    // Verify the child belongs to this parent
+    const Parent = require('../models/Parent');
+    const Student = require('../models/Student');
+    
+    const parent = await Parent.findById(parentId);
+    if (!parent) {
+      return res.status(404).json({
+        success: false,
+        error: 'Parent not found'
+      });
+    }
+
+    // Get all student IDs (support both old and new schema)
+    let studentIds = [];
+    if (parent.studentIds && parent.studentIds.length > 0) {
+      studentIds = parent.studentIds.map(id => id.toString());
+    } else if (parent.studentId) {
+      studentIds = [parent.studentId.toString()];
+    }
+
+    // Check if the requested child ID is one of the parent's children
+    if (!studentIds.includes(childId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. You can only view your own child\'s submissions.'
+      });
+    }
+
+    const child = await Student.findById(childId);
+    if (!child || !child.classId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Child not found or not assigned to any class'
+      });
+    }
+
+    // Get assignments for the child's class and filter submissions
+    const assignments = await Assignment.find({
+      classId: child.classId,
+      schoolId: schoolId,
+      'submissions.studentId': childId // Only assignments where this student has submitted
+    })
+    .populate('subjectId', 'name')
+    .populate('classId', 'name')
+    .sort({ 'submissions.submittedAt': -1 });
+
+    // Extract only the student's submissions from each assignment
+    const submissions = [];
+    assignments.forEach(assignment => {
+      const studentSubmission = assignment.submissions.find(
+        sub => sub.studentId.toString() === childId
+      );
+      
+      if (studentSubmission && studentSubmission.status !== 'pending') {
+        submissions.push({
+          _id: studentSubmission._id,
+          assignmentId: assignment._id,
+          assignmentTitle: assignment.title,
+          assignmentDescription: assignment.description,
+          assignmentDueDate: assignment.dueDate,
+          assignmentTotalMarks: assignment.totalMarks,
+          assignmentPoints: assignment.points,
+          subjectId: assignment.subjectId,
+          classId: assignment.classId,
+          submittedAt: studentSubmission.submittedAt,
+          attachments: studentSubmission.attachments,
+          marks: studentSubmission.marks,
+          pointsEarned: studentSubmission.pointsEarned,
+          feedback: studentSubmission.feedback,
+          status: studentSubmission.status
+        });
+      }
+    });
+
+    res.json({
+      success: true,
+      data: submissions
+    });
+  } catch (error) {
+    console.error('Error fetching child assignment submissions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while fetching child assignment submissions'
+    });
+  }
+};
+
 module.exports = {
   getAssignments,
   getAssignment,
@@ -530,6 +1049,11 @@ module.exports = {
   updateAssignment,
   deleteAssignment,
   getTeacherClasses,
+  submitAssignment,
+  getMySubmissions,
+  getChildAssignments,
+  getChildAssignmentSubmissions,
+  uploadDocument,
   setSocketIO
 };
 

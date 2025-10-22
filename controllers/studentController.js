@@ -1301,6 +1301,234 @@ const getStudentPerformance = async (req, res) => {
   }
 };
 
+// @desc    Get student's own exam marks
+// @route   GET /api/students/exam-marks
+// @access  Private (Student)
+const getStudentExamMarks = async (req, res) => {
+  try {
+    const studentId = req.user._id;
+    const student = await Student.findById(studentId).populate('classId', 'name section');
+    
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        error: 'Student not found'
+      });
+    }
+
+    const ExamMark = require('../models/ExamMark');
+    
+    // Get exam marks for this student
+    const examMarks = await ExamMark.find({
+      studentId: studentId,
+      schoolId: student.schoolId
+    })
+      .populate('examId', 'name examType examDate totalMarks')
+      .populate('subjectId', 'name code')
+      .sort({ 'examId.examDate': -1 })
+      .limit(50); // Limit to recent 50 exams
+
+    // Group marks by subject for easy visualization
+    const marksBySubject = {};
+    
+    examMarks.forEach(mark => {
+      if (mark.subjectId && !mark.isAbsent) {
+        const subjectName = mark.subjectId.name;
+        
+        if (!marksBySubject[subjectName]) {
+          marksBySubject[subjectName] = {
+            subjectId: mark.subjectId._id,
+            subjectName: subjectName,
+            subjectCode: mark.subjectId.code,
+            exams: [],
+            avgPercentage: 0,
+            totalMarks: 0,
+            marksObtained: 0
+          };
+        }
+        
+        marksBySubject[subjectName].exams.push({
+          examId: mark.examId?._id,
+          examName: mark.examId?.name,
+          examType: mark.examId?.examType,
+          examDate: mark.examId?.examDate,
+          marksObtained: mark.marksObtained,
+          totalMarks: mark.totalMarks,
+          percentage: mark.percentage,
+          grade: mark.grade,
+          isPassed: mark.isPassed
+        });
+        
+        marksBySubject[subjectName].totalMarks += mark.totalMarks;
+        marksBySubject[subjectName].marksObtained += mark.marksObtained;
+      }
+    });
+
+    // Calculate average percentage for each subject
+    Object.keys(marksBySubject).forEach(subjectName => {
+      const subject = marksBySubject[subjectName];
+      if (subject.totalMarks > 0) {
+        subject.avgPercentage = Math.round((subject.marksObtained / subject.totalMarks) * 100);
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        studentId: student._id,
+        studentName: student.name,
+        rollNumber: student.rollNumber,
+        class: student.classId?.name,
+        section: student.classId?.section,
+        totalExams: examMarks.length,
+        subjects: Object.values(marksBySubject),
+        allMarks: examMarks
+      }
+    });
+  } catch (error) {
+    console.error('Get student exam marks error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while fetching exam marks'
+    });
+  }
+};
+
+// @desc    Get student performance report with exam marks
+// @route   GET /api/students/performance-report
+// @access  Private (School Admin, Teacher)
+const getStudentPerformanceReport = async (req, res) => {
+  try {
+    const { schoolId, classId } = req.query;
+
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        error: 'School ID is required'
+      });
+    }
+
+    console.log('Fetching performance report for:', { schoolId, classId });
+
+    // Build filter
+    const filter = { schoolId, isActive: true };
+    if (classId && classId !== '') {
+      filter.classId = classId;
+    }
+
+    // Get all students based on filter
+    const students = await Student.find(filter)
+      .populate('classId', 'name section')
+      .select('name rollNumber classId');
+
+    // Get all exam marks for these students
+    const ExamMark = require('../models/ExamMark');
+    const studentIds = students.map(s => s._id);
+
+    const examMarkFilter = {
+      schoolId,
+      studentId: { $in: studentIds }
+    };
+    
+    // If classId is specified, also filter exam marks by class
+    if (classId) {
+      examMarkFilter.classId = classId;
+    }
+
+    const examMarks = await ExamMark.find(examMarkFilter)
+      .populate('examId', 'name examType examDate totalMarks')
+      .populate('subjectId', 'name')
+      .sort({ createdAt: -1 });
+
+    console.log(`Found ${students.length} students and ${examMarks.length} exam marks`);
+
+    // Calculate performance metrics for each student
+    const performanceData = students.map(student => {
+      const studentMarks = examMarks.filter(
+        mark => mark.studentId.toString() === student._id.toString()
+      );
+
+      // Calculate average percentage
+      const validMarks = studentMarks.filter(m => !m.isAbsent);
+      const avgPercentage = validMarks.length > 0
+        ? Math.round(validMarks.reduce((sum, m) => sum + m.percentage, 0) / validMarks.length)
+        : 0;
+
+      // Calculate average grade
+      let avgGrade = 'N/A';
+      if (avgPercentage >= 90) avgGrade = 'A+';
+      else if (avgPercentage >= 80) avgGrade = 'A';
+      else if (avgPercentage >= 70) avgGrade = 'B+';
+      else if (avgPercentage >= 60) avgGrade = 'B';
+      else if (avgPercentage >= 50) avgGrade = 'C';
+      else if (avgPercentage >= 40) avgGrade = 'D';
+      else if (avgPercentage >= 33) avgGrade = 'E';
+      else if (avgPercentage > 0) avgGrade = 'F';
+
+      // Get exam details with marks
+      const exams = studentMarks.map(mark => ({
+        examId: mark.examId?._id,
+        examName: mark.examId?.name,
+        examType: mark.examId?.examType,
+        examDate: mark.examId?.examDate,
+        subject: mark.subjectId?.name,
+        marksObtained: mark.marksObtained,
+        totalMarks: mark.totalMarks,
+        percentage: Math.round(mark.percentage),
+        grade: mark.grade,
+        isAbsent: mark.isAbsent,
+        isPassed: mark.isPassed
+      }));
+
+      return {
+        studentId: student._id,
+        name: student.name,
+        rollNumber: student.rollNumber,
+        class: student.classId?.name,
+        section: student.classId?.section,
+        avgPercentage,
+        avgGrade,
+        totalExams: studentMarks.length,
+        examsAppeared: validMarks.length,
+        exams
+      };
+    });
+
+    // Sort by average percentage descending
+    performanceData.sort((a, b) => b.avgPercentage - a.avgPercentage);
+
+    // Get grade distribution
+    const gradeDistribution = {
+      'A+': 0, 'A': 0, 'B+': 0, 'B': 0, 'C': 0, 'D': 0, 'E': 0, 'F': 0, 'N/A': 0
+    };
+    performanceData.forEach(data => {
+      if (gradeDistribution[data.avgGrade] !== undefined) {
+        gradeDistribution[data.avgGrade]++;
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        students: performanceData,
+        summary: {
+          totalStudents: students.length,
+          avgClassPercentage: performanceData.length > 0
+            ? Math.round(performanceData.reduce((sum, s) => sum + s.avgPercentage, 0) / performanceData.length)
+            : 0,
+          gradeDistribution
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get student performance report error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while fetching student performance report'
+    });
+  }
+};
+
 module.exports = {
   getStudents,
   getStudent,
@@ -1319,5 +1547,7 @@ module.exports = {
   getStudentAssignments,
   getStudentNotes,
   getStudentAttendance,
-  getStudentPerformance
+  getStudentPerformance,
+  getStudentPerformanceReport,
+  getStudentExamMarks
 };

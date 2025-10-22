@@ -16,18 +16,22 @@ const importantDateSchema = new mongoose.Schema({
     type: Date,
     required: [true, 'Date is required']
   },
+  // Optional end date for multi-day events
+  endDate: {
+    type: Date
+  },
   type: {
     type: String,
     required: [true, 'Event type is required'],
     enum: {
-      values: ['holiday', 'exam', 'event', 'meeting', 'deadline', 'other'],
-      message: 'Event type must be one of: holiday, exam, event, meeting, deadline, other'
+      values: ['holiday', 'event', 'meeting', 'deadline', 'other'],
+      message: 'Event type must be one of: holiday, event, meeting, deadline, other'
     }
   },
   priority: {
     type: String,
-    enum: ['low', 'medium', 'high', 'critical'],
-    default: 'medium'
+    enum: ['normal', 'low', 'medium', 'high', 'critical'],
+    default: 'normal'
   },
   schoolId: {
     type: mongoose.Schema.Types.ObjectId,

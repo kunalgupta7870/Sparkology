@@ -38,6 +38,9 @@ tmp/
 temp/
 *.tmp
 
+# Uploaded files
+uploads/
+
 # OS files
 Thumbs.db
 .DS_Store

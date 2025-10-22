@@ -30,11 +30,6 @@ const productSchema = new mongoose.Schema({
     min: [0, 'Stock cannot be negative'],
     default: 0
   },
-  minimum: {
-    type: Number,
-    default: 10,
-    min: [0, 'Minimum stock cannot be negative']
-  },
   sku: {
     type: String,
     unique: true,
@@ -216,14 +211,13 @@ productSchema.index({ tags: 1 });
 // Virtual for stock status
 productSchema.virtual('stockStatus').get(function() {
   if (this.stock <= 0) return 'out_of_stock';
-  if (this.stock <= this.minimum) return 'low_stock';
   if (this.stock <= this.reorderPoint) return 'reorder_needed';
   return 'in_stock';
 });
 
 // Virtual for current price after discount
 productSchema.virtual('currentPrice').get(function() {
-  if (this.pricing.discount > 0) {
+  if (this.pricing && this.pricing.discount > 0) {
     return this.price * (1 - this.pricing.discount / 100);
   }
   return this.price;
@@ -231,7 +225,7 @@ productSchema.virtual('currentPrice').get(function() {
 
 // Virtual for profit margin
 productSchema.virtual('profitMargin').get(function() {
-  if (this.pricing.cost > 0) {
+  if (this.pricing && this.pricing.cost > 0) {
     return ((this.currentPrice - this.pricing.cost) / this.pricing.cost) * 100;
   }
   return 0;
@@ -239,11 +233,13 @@ productSchema.virtual('profitMargin').get(function() {
 
 // Virtual for total sales
 productSchema.virtual('totalSales').get(function() {
+  if (!this.salesHistory || !Array.isArray(this.salesHistory)) return 0;
   return this.salesHistory.reduce((total, sale) => total + sale.quantity, 0);
 });
 
 // Virtual for total revenue
 productSchema.virtual('totalRevenue').get(function() {
+  if (!this.salesHistory || !Array.isArray(this.salesHistory)) return 0;
   return this.salesHistory.reduce((total, sale) => total + (sale.quantity * sale.price), 0);
 });
 
@@ -264,7 +260,7 @@ productSchema.statics.getProductsBySchool = function(schoolId) {
 
 // Static method to get low stock products
 productSchema.statics.getLowStockProducts = function(schoolId = null) {
-  const query = { stock: { $lte: '$minimum' } };
+  const query = { $expr: { $lte: ['$stock', '$reorderPoint'] } };
   if (schoolId) query.schoolId = schoolId;
   return this.find(query).populate('schoolId', 'name code');
 };

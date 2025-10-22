@@ -42,13 +42,13 @@ const validateImportantDate = [
   body('type')
     .notEmpty()
     .withMessage('Event type is required')
-    .isIn(['holiday', 'exam', 'event', 'meeting', 'deadline', 'other'])
-    .withMessage('Event type must be one of: holiday, exam, event, meeting, deadline, other'),
+    .isIn(['holiday', 'event', 'meeting', 'deadline', 'other'])
+    .withMessage('Event type must be one of: holiday, event, meeting, deadline, other'),
 
   body('priority')
     .optional()
-    .isIn(['low', 'medium', 'high', 'critical'])
-    .withMessage('Priority must be one of: low, medium, high, critical'),
+    .isIn(['normal', 'low', 'medium', 'high', 'critical'])
+    .withMessage('Priority must be one of: normal, low, medium, high, critical'),
 
   body('classes')
     .optional()
@@ -58,12 +58,12 @@ const validateImportantDate = [
   body('classes.*')
     .optional()
     .custom((value, { req }) => {
-      // If applyToAllClasses is true, skip validation for empty array
-      if (req.body.applyToAllClasses === true && (!req.body.classes || req.body.classes.length === 0)) {
+      // If applyToAllClasses is true, always allow (skip validation)
+      if (req.body.applyToAllClasses === true || req.body.applyToAllClasses === 'true') {
         return true;
       }
-      // Otherwise validate as MongoDB ObjectId
-      if (!value.match(/^[0-9a-fA-F]{24}$/)) {
+      // Otherwise validate as MongoDB ObjectId if value exists
+      if (value && !value.match(/^[0-9a-fA-F]{24}$/)) {
         throw new Error('Each class must be a valid MongoDB ObjectId');
       }
       return true;
@@ -75,15 +75,20 @@ const validateImportantDate = [
     .withMessage('applyToAllClasses must be a boolean'),
 
   body('startTime')
-    .optional()
-    .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
-    .withMessage('Start time must be in HH:MM format'),
+    .optional({ checkFalsy: true })
+    .custom((value) => {
+      if (value && !value.match(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)) {
+        throw new Error('Start time must be in HH:MM format');
+      }
+      return true;
+    }),
 
   body('endTime')
-    .optional()
-    .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
-    .withMessage('End time must be in HH:MM format')
+    .optional({ checkFalsy: true })
     .custom((value, { req }) => {
+      if (value && !value.match(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)) {
+        throw new Error('End time must be in HH:MM format');
+      }
       if (value && req.body.startTime) {
         const startTime = req.body.startTime.split(':');
         const endTime = value.split(':');
@@ -93,6 +98,22 @@ const validateImportantDate = [
         
         if (endMinutes <= startMinutes) {
           throw new Error('End time must be after start time');
+        }
+      }
+      return true;
+    }),
+
+  body('endDate')
+    .optional({ checkFalsy: true })
+    .isISO8601()
+    .withMessage('End date must be a valid ISO 8601 date')
+    .custom((value, { req }) => {
+      if (value && req.body.date) {
+        const startDate = new Date(req.body.date);
+        const endDate = new Date(value);
+        
+        if (endDate < startDate) {
+          throw new Error('End date must be after or equal to start date');
         }
       }
       return true;
@@ -152,13 +173,13 @@ const validateImportantDateUpdate = [
 
   body('type')
     .optional()
-    .isIn(['holiday', 'exam', 'event', 'meeting', 'deadline', 'other'])
-    .withMessage('Event type must be one of: holiday, exam, event, meeting, deadline, other'),
+    .isIn(['holiday', 'event', 'meeting', 'deadline', 'other'])
+    .withMessage('Event type must be one of: holiday, event, meeting, deadline, other'),
 
   body('priority')
     .optional()
-    .isIn(['low', 'medium', 'high', 'critical'])
-    .withMessage('Priority must be one of: low, medium, high, critical'),
+    .isIn(['normal', 'low', 'medium', 'high', 'critical'])
+    .withMessage('Priority must be one of: normal, low, medium, high, critical'),
 
   body('classes')
     .optional()
@@ -168,12 +189,12 @@ const validateImportantDateUpdate = [
   body('classes.*')
     .optional()
     .custom((value, { req }) => {
-      // If applyToAllClasses is true, skip validation for empty array
-      if (req.body.applyToAllClasses === true && (!req.body.classes || req.body.classes.length === 0)) {
+      // If applyToAllClasses is true, always allow (skip validation)
+      if (req.body.applyToAllClasses === true || req.body.applyToAllClasses === 'true') {
         return true;
       }
-      // Otherwise validate as MongoDB ObjectId
-      if (!value.match(/^[0-9a-fA-F]{24}$/)) {
+      // Otherwise validate as MongoDB ObjectId if value exists
+      if (value && !value.match(/^[0-9a-fA-F]{24}$/)) {
         throw new Error('Each class must be a valid MongoDB ObjectId');
       }
       return true;
@@ -185,15 +206,20 @@ const validateImportantDateUpdate = [
     .withMessage('applyToAllClasses must be a boolean'),
 
   body('startTime')
-    .optional()
-    .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
-    .withMessage('Start time must be in HH:MM format'),
+    .optional({ checkFalsy: true })
+    .custom((value) => {
+      if (value && !value.match(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)) {
+        throw new Error('Start time must be in HH:MM format');
+      }
+      return true;
+    }),
 
   body('endTime')
-    .optional()
-    .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
-    .withMessage('End time must be in HH:MM format')
+    .optional({ checkFalsy: true })
     .custom((value, { req }) => {
+      if (value && !value.match(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)) {
+        throw new Error('End time must be in HH:MM format');
+      }
       if (value && req.body.startTime) {
         const startTime = req.body.startTime.split(':');
         const endTime = value.split(':');
@@ -203,6 +229,22 @@ const validateImportantDateUpdate = [
         
         if (endMinutes <= startMinutes) {
           throw new Error('End time must be after start time');
+        }
+      }
+      return true;
+    }),
+
+  body('endDate')
+    .optional({ checkFalsy: true })
+    .isISO8601()
+    .withMessage('End date must be a valid ISO 8601 date')
+    .custom((value, { req }) => {
+      if (value && req.body.date) {
+        const startDate = new Date(req.body.date);
+        const endDate = new Date(value);
+        
+        if (endDate < startDate) {
+          throw new Error('End date must be after or equal to start date');
         }
       }
       return true;

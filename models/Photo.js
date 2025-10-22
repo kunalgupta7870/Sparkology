@@ -1,9 +1,9 @@
 const mongoose = require('mongoose');
 
-const photoSchema = new mongoose.Schema({
+const factOfTheDaySchema = new mongoose.Schema({
   title: {
     type: String,
-    required: [true, 'Photo title is required'],
+    required: [true, 'Fact title is required'],
     trim: true,
     maxlength: [200, 'Title cannot exceed 200 characters']
   },
@@ -111,16 +111,16 @@ const photoSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
-photoSchema.index({ title: 'text', description: 'text', tags: 'text' });
-photoSchema.index({ schoolId: 1 });
-photoSchema.index({ uploadedBy: 1 });
-photoSchema.index({ category: 1 });
-photoSchema.index({ tags: 1 });
-photoSchema.index({ isActive: 1, isPublic: 1 });
-photoSchema.index({ createdAt: -1 });
+factOfTheDaySchema.index({ title: 'text', description: 'text', tags: 'text' });
+factOfTheDaySchema.index({ schoolId: 1 });
+factOfTheDaySchema.index({ uploadedBy: 1 });
+factOfTheDaySchema.index({ category: 1 });
+factOfTheDaySchema.index({ tags: 1 });
+factOfTheDaySchema.index({ isActive: 1, isPublic: 1 });
+factOfTheDaySchema.index({ createdAt: -1 });
 
 // Virtual for formatted file size
-photoSchema.virtual('formattedFileSize').get(function() {
+factOfTheDaySchema.virtual('formattedFileSize').get(function() {
   if (this.fileSize === 0) return 'Unknown';
   
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
@@ -129,7 +129,7 @@ photoSchema.virtual('formattedFileSize').get(function() {
 });
 
 // Virtual for aspect ratio
-photoSchema.virtual('aspectRatio').get(function() {
+factOfTheDaySchema.virtual('aspectRatio').get(function() {
   if (this.width && this.height) {
     return (this.width / this.height).toFixed(2);
   }
@@ -137,7 +137,7 @@ photoSchema.virtual('aspectRatio').get(function() {
 });
 
 // Virtual for formatted dimensions
-photoSchema.virtual('formattedDimensions').get(function() {
+factOfTheDaySchema.virtual('formattedDimensions').get(function() {
   if (this.width && this.height) {
     return `${this.width} × ${this.height}`;
   }
@@ -145,7 +145,7 @@ photoSchema.virtual('formattedDimensions').get(function() {
 });
 
 // Pre-save middleware to generate thumbnail URL if not provided
-photoSchema.pre('save', function(next) {
+factOfTheDaySchema.pre('save', function(next) {
   if (this.imageUrl && !this.thumbnailUrl) {
     // Generate thumbnail URL from Cloudinary URL with proper transformation syntax
     this.thumbnailUrl = this.imageUrl.replace('/upload/', '/upload/w_300,h_200,c_fill/');
@@ -153,20 +153,20 @@ photoSchema.pre('save', function(next) {
   next();
 });
 
-// Static method to get photos by school
-photoSchema.statics.getPhotosBySchool = function(schoolId, filters = {}) {
+// Static method to get facts by school
+factOfTheDaySchema.statics.getFactsBySchool = function(schoolId, filters = {}) {
   const query = { schoolId, isActive: true, ...filters };
   return this.find(query).populate('uploadedBy', 'name email');
 };
 
-// Static method to get photos by category
-photoSchema.statics.getPhotosByCategory = function(category, filters = {}) {
+// Static method to get facts by category
+factOfTheDaySchema.statics.getFactsByCategory = function(category, filters = {}) {
   const query = { category, isActive: true, isPublic: true, ...filters };
   return this.find(query).populate('uploadedBy', 'name email');
 };
 
-// Static method to search photos
-photoSchema.statics.searchPhotos = function(query, filters = {}) {
+// Static method to search facts
+factOfTheDaySchema.statics.searchFacts = function(query, filters = {}) {
   const searchQuery = {
     $text: { $search: query },
     isActive: true,
@@ -179,8 +179,8 @@ photoSchema.statics.searchPhotos = function(query, filters = {}) {
     .populate('uploadedBy', 'name email');
 };
 
-// Static method to get photos by tags
-photoSchema.statics.getPhotosByTags = function(tags, filters = {}) {
+// Static method to get facts by tags
+factOfTheDaySchema.statics.getFactsByTags = function(tags, filters = {}) {
   const query = {
     tags: { $in: tags },
     isActive: true,
@@ -191,8 +191,8 @@ photoSchema.statics.getPhotosByTags = function(tags, filters = {}) {
   return this.find(query).populate('uploadedBy', 'name email');
 };
 
-// Static method to get popular photos
-photoSchema.statics.getPopularPhotos = function(limit = 10, filters = {}) {
+// Static method to get popular facts
+factOfTheDaySchema.statics.getPopularFacts = function(limit = 10, filters = {}) {
   const query = { isActive: true, isPublic: true, ...filters };
   return this.find(query)
     .sort({ viewCount: -1 })
@@ -201,28 +201,28 @@ photoSchema.statics.getPopularPhotos = function(limit = 10, filters = {}) {
 };
 
 // Instance method to increment view count
-photoSchema.methods.incrementViewCount = function() {
+factOfTheDaySchema.methods.incrementViewCount = function() {
   this.viewCount += 1;
   return this.save();
 };
 
 // Instance method to increment download count
-photoSchema.methods.incrementDownloadCount = function() {
+factOfTheDaySchema.methods.incrementDownloadCount = function() {
   this.downloadCount += 1;
   return this.save();
 };
 
 // Instance method to add tags
-photoSchema.methods.addTags = function(newTags) {
+factOfTheDaySchema.methods.addTags = function(newTags) {
   const tagsToAdd = newTags.filter(tag => !this.tags.includes(tag.toLowerCase()));
   this.tags.push(...tagsToAdd);
   return this.save();
 };
 
 // Instance method to remove tags
-photoSchema.methods.removeTags = function(tagsToRemove) {
+factOfTheDaySchema.methods.removeTags = function(tagsToRemove) {
   this.tags = this.tags.filter(tag => !tagsToRemove.includes(tag));
   return this.save();
 };
 
-module.exports = mongoose.model('Photo', photoSchema);
+module.exports = mongoose.model('FactOfTheDay', factOfTheDaySchema);

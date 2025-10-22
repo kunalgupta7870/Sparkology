@@ -1,6 +1,8 @@
 const Note = require('../models/Note');
 const Student = require('../models/Student');
 const Parent = require('../models/Parent');
+const Class = require('../models/Class');
+const Subject = require('../models/Subject');
 const { validationResult } = require('express-validator');
 
 // WebSocket instance (will be injected)
@@ -17,29 +19,121 @@ const setSocketIO = (socketIO) => {
 // @access  Private (Teacher)
 const createNote = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
+    // Skip express-validator for multipart form data
+    // We'll do manual validation instead
+
+    const {
+      title,
+      content,
+      classId,
+      subjectId,
+      attachments
+    } = req.body;
+
+    console.log('📥 Backend: Received note data:', {
+      title,
+      content,
+      classId,
+      subjectId,
+      attachments,
+      files: req.files?.length || 0
+    });
+    
+    console.log('📥 Backend: req.files details:', JSON.stringify(req.files, null, 2));
+
+    // Manual validation
+    if (!title || !content || !classId || !subjectId) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
-        details: errors.array()
+        error: 'Missing required fields: title, content, classId, and subjectId are required'
       });
     }
 
-    const { classId, subjectId, title, content, attachments } = req.body;
     const schoolId = req.user.schoolId;
     const teacherId = req.user._id;
 
-    const note = await Note.create({
-      schoolId,
+    // Verify class and subject belong to teacher
+    const classData = await Class.findOne({ _id: classId, schoolId });
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    const subject = await Subject.findOne({ 
+      _id: subjectId, 
+      classId,
+      teacherId,
+      schoolId 
+    });
+    
+    if (!subject) {
+      return res.status(404).json({
+        success: false,
+        error: 'Subject not found or not assigned to teacher'
+      });
+    }
+
+    // Prepare attachments from uploaded files (Local Storage)
+    const fileAttachments = [];
+    if (req.files && req.files.length > 0) {
+      console.log('📎 Backend: Processing', req.files.length, 'files for note');
+      
+      req.files.forEach((file, index) => {
+        console.log(`📎 Backend: File ${index}:`, {
+          originalname: file.originalname,
+          filename: file.filename,
+          path: file.path,
+          size: file.size
+        });
+        
+        // Use local file path
+        const fileUrl = `/uploads/documents/${file.filename}`;
+        
+        console.log(`📎 Backend: Local file URL: ${fileUrl}`);
+        
+        fileAttachments.push({
+          fileName: file.originalname,
+          fileUrl: fileUrl, // Local file URL
+          fileType: 'pdf',
+          fileSize: file.size
+        });
+      });
+      
+      console.log('📎 Backend: Prepared attachments array:', JSON.stringify(fileAttachments, null, 2));
+    }
+
+    // Create note - Build data object carefully
+    const noteData = {
+      title,
+      content,
       classId,
       subjectId,
       teacherId,
-      title,
-      content,
-      attachments: attachments || [],
-      createdBy: teacherId,
+      schoolId,
+      createdBy: teacherId
+    };
+    
+    // Add attachments separately to avoid any stringification
+    if (fileAttachments.length > 0) {
+      noteData.attachments = fileAttachments;
+    } else if (attachments) {
+      noteData.attachments = attachments;
+    } else {
+      noteData.attachments = [];
+    }
+
+    console.log('💾 Backend: Note data type check:', {
+      attachmentsIsArray: Array.isArray(noteData.attachments),
+      attachmentsLength: noteData.attachments?.length,
+      attachmentsType: typeof noteData.attachments,
+      firstAttachment: noteData.attachments[0]
     });
+    
+    // Use new Note() instead of create() to avoid casting issues
+    const note = new Note(noteData);
+    await note.save();
 
     // Populate the note with related data
     await note.populate([
@@ -393,6 +487,123 @@ const deleteNote = async (req, res) => {
   }
 };
 
+// @desc    Update note attachments
+// @route   PUT /api/notes/:id/attachments
+// @access  Private (Teacher)
+const updateNoteAttachments = async (req, res) => {
+  try {
+    const { attachments } = req.body;
+    const noteId = req.params.id;
+    const teacherId = req.user._id;
+
+    // Find the note and verify ownership
+    const note = await Note.findOne({ _id: noteId, teacherId });
+    if (!note) {
+      return res.status(404).json({
+        success: false,
+        error: 'Note not found or not authorized'
+      });
+    }
+
+    // Update attachments
+    note.attachments = attachments || [];
+    await note.save();
+
+    // Populate the note with related data
+    await note.populate([
+      { path: 'classId', select: 'name section' },
+      { path: 'subjectId', select: 'name' },
+      { path: 'teacherId', select: 'name email' }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: note
+    });
+  } catch (error) {
+    console.error('Error updating note attachments:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while updating note attachments'
+    });
+  }
+};
+
+// @desc    Add attachments to existing note
+// @route   POST /api/notes/:id/attachments
+// @access  Private (Teacher)
+const addNoteAttachments = async (req, res) => {
+  try {
+    const noteId = req.params.id;
+    const teacherId = req.user._id;
+
+    console.log('📥 Backend: Adding attachments to note:', noteId);
+    console.log('📥 Backend: req.files details:', JSON.stringify(req.files, null, 2));
+
+    // Find the note and verify ownership
+    const note = await Note.findOne({ _id: noteId, teacherId });
+    if (!note) {
+      return res.status(404).json({
+        success: false,
+        error: 'Note not found or not authorized'
+      });
+    }
+
+    // Prepare attachments from uploaded files (Local Storage)
+    const fileAttachments = [];
+    if (req.files && req.files.length > 0) {
+      console.log('📎 Backend: Processing', req.files.length, 'files for note attachment');
+      
+      req.files.forEach((file, index) => {
+        console.log(`📎 Backend: File ${index}:`, {
+          originalname: file.originalname,
+          filename: file.filename,
+          path: file.path,
+          size: file.size
+        });
+        
+        // Use local file path
+        const fileUrl = `/uploads/documents/${file.filename}`;
+        
+        console.log(`📎 Backend: Local file URL: ${fileUrl}`);
+        
+        fileAttachments.push({
+          fileName: file.originalname,
+          fileUrl: fileUrl, // Local file URL
+          fileType: 'pdf',
+          fileSize: file.size
+        });
+      });
+      
+      console.log('📎 Backend: Prepared attachments array:', JSON.stringify(fileAttachments, null, 2));
+    }
+
+    // Add new attachments to existing ones
+    if (fileAttachments.length > 0) {
+      note.attachments = [...(note.attachments || []), ...fileAttachments];
+      await note.save();
+    }
+
+    // Populate the note with related data
+    await note.populate([
+      { path: 'classId', select: 'name section' },
+      { path: 'subjectId', select: 'name' },
+      { path: 'teacherId', select: 'name email' }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: note
+    });
+  } catch (error) {
+    console.error('Error adding note attachments:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while adding note attachments'
+    });
+  }
+};
+
 module.exports = {
   createNote,
   getNotesForClassSubject,
@@ -400,5 +611,7 @@ module.exports = {
   getNoteById,
   updateNote,
   deleteNote,
-  setSocketIO
+  setSocketIO,
+  updateNoteAttachments,
+  addNoteAttachments,
 };

@@ -59,8 +59,12 @@ const courseSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    default: 'USD',
+    default: 'INR',
     maxlength: [3, 'Currency code cannot exceed 3 characters']
+  },
+  isPaid: {
+    type: Boolean,
+    default: false // true if price > 0
   },
   startDate: {
     type: Date,
@@ -194,6 +198,10 @@ const courseSchema = new mongoose.Schema({
       type: Boolean,
       default: true
     },
+    isPreview: {
+      type: Boolean,
+      default: false // Only one video can be marked as preview/free
+    },
     uploadedAt: {
       type: Date,
       default: Date.now
@@ -208,6 +216,151 @@ const courseSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  // Course notes (PDFs)
+  notes: [{
+    title: {
+      type: String,
+      required: [true, 'Note title is required'],
+      trim: true,
+      maxlength: [200, 'Note title cannot exceed 200 characters']
+    },
+    description: {
+      type: String,
+      trim: true,
+      maxlength: [500, 'Note description cannot exceed 500 characters']
+    },
+    fileUrl: {
+      type: String,
+      required: [true, 'File URL is required'],
+      trim: true
+    },
+    fileSize: {
+      type: Number, // in bytes
+      default: 0
+    },
+    uploadedAt: {
+      type: Date,
+      default: Date.now
+    },
+    order: {
+      type: Number,
+      default: 1
+    }
+  }],
+  // Practice quiz questions (legacy - kept for backward compatibility)
+  quizQuestions: [{
+    question: {
+      type: String,
+      required: [true, 'Question is required'],
+      trim: true,
+      maxlength: [500, 'Question cannot exceed 500 characters']
+    },
+    options: {
+      type: [{
+        type: String,
+        required: true,
+        trim: true,
+        maxlength: [200, 'Option cannot exceed 200 characters']
+      }],
+      validate: {
+        validator: function(v) {
+          return v && v.length === 4;
+        },
+        message: 'Exactly 4 options are required'
+      }
+    },
+    correctAnswer: {
+      type: Number,
+      required: [true, 'Correct answer index is required'],
+      min: [0, 'Answer index must be at least 0'],
+      max: [3, 'Answer index must be at most 3']
+    },
+    explanation: {
+      type: String,
+      trim: true,
+      maxlength: [500, 'Explanation cannot exceed 500 characters']
+    },
+    difficulty: {
+      type: String,
+      enum: ['easy', 'medium', 'hard'],
+      default: 'medium'
+    },
+    order: {
+      type: Number,
+      default: 1
+    }
+  }],
+  // Quizzes - array of separate named quizzes with multiple questions each
+  quizzes: [{
+    title: {
+      type: String,
+      required: [true, 'Quiz title is required'],
+      trim: true,
+      maxlength: [200, 'Quiz title cannot exceed 200 characters']
+    },
+    description: {
+      type: String,
+      trim: true,
+      maxlength: [500, 'Quiz description cannot exceed 500 characters']
+    },
+    timeLimit: {
+      type: Number, // in minutes
+      default: 30,
+      min: [1, 'Time limit must be at least 1 minute']
+    },
+    passingScore: {
+      type: Number, // percentage (0-100)
+      default: 60,
+      min: [0, 'Passing score must be at least 0'],
+      max: [100, 'Passing score cannot exceed 100']
+    },
+    questions: [{
+      question: {
+        type: String,
+        required: [true, 'Question is required'],
+        trim: true,
+        maxlength: [500, 'Question cannot exceed 500 characters']
+      },
+      options: {
+        type: [{
+          type: String,
+          required: true,
+          trim: true,
+          maxlength: [200, 'Option cannot exceed 200 characters']
+        }],
+        validate: {
+          validator: function(v) {
+            return v && v.length === 4;
+          },
+          message: 'Exactly 4 options are required'
+        }
+      },
+      correctAnswer: {
+        type: Number,
+        required: [true, 'Correct answer index is required'],
+        min: [0, 'Answer index must be at least 0'],
+        max: [3, 'Answer index must be at most 3']
+      },
+      explanation: {
+        type: String,
+        trim: true,
+        maxlength: [500, 'Explanation cannot exceed 500 characters']
+      },
+      difficulty: {
+        type: String,
+        enum: ['easy', 'medium', 'hard'],
+        default: 'medium'
+      },
+      order: {
+        type: Number,
+        default: 1
+      }
+    }],
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   // Additional course metadata
   totalDuration: {
     type: Number, // total duration in seconds
@@ -215,6 +368,18 @@ const courseSchema = new mongoose.Schema({
   },
   videoCount: {
     type: Number,
+    default: 0
+  },
+  notesCount: {
+    type: Number,
+    default: 0
+  },
+  quizCount: {
+    type: Number,
+    default: 0
+  },
+  quizzesCount: {
+    type: Number, // number of separate named quizzes
     default: 0
   }
 }, {
@@ -254,11 +419,21 @@ courseSchema.virtual('completionPercentage').get(function() {
   return Math.round((elapsed / totalDuration) * 100);
 });
 
-// Pre-save middleware to validate dates
+// Pre-save middleware to validate dates and set isPaid
 courseSchema.pre('save', function(next) {
   if (this.endDate && this.endDate <= this.startDate) {
     return next(new Error('End date must be after start date'));
   }
+  
+  // Set isPaid based on price
+  this.isPaid = this.price > 0;
+  
+  // Ensure only one video is marked as preview
+  const previewVideos = this.videos.filter(v => v.isPreview);
+  if (previewVideos.length > 1) {
+    return next(new Error('Only one video can be marked as preview'));
+  }
+  
   next();
 });
 
@@ -351,6 +526,94 @@ courseSchema.methods.getVideosSorted = function() {
 // Instance method to get published videos only
 courseSchema.methods.getPublishedVideos = function() {
   return this.videos.filter(video => video.isPublished).sort((a, b) => a.order - b.order);
+};
+
+// Instance method to get preview video (free sample)
+courseSchema.methods.getPreviewVideo = function() {
+  return this.videos.find(video => video.isPreview && video.isPublished);
+};
+
+// Instance method to set preview video
+courseSchema.methods.setPreviewVideo = function(videoId) {
+  // Remove preview flag from all videos
+  this.videos.forEach(video => {
+    video.isPreview = false;
+  });
+  
+  // Set the specified video as preview
+  const video = this.videos.id(videoId);
+  if (video) {
+    video.isPreview = true;
+    return this.save();
+  }
+  throw new Error('Video not found');
+};
+
+// Instance method to add a note
+courseSchema.methods.addNote = function(noteData) {
+  this.notes.push(noteData);
+  this.notesCount = this.notes.length;
+  return this.save();
+};
+
+// Instance method to remove a note
+courseSchema.methods.removeNote = function(noteId) {
+  this.notes = this.notes.filter(note => note._id.toString() !== noteId);
+  this.notesCount = this.notes.length;
+  return this.save();
+};
+
+// Instance method to add a quiz question
+courseSchema.methods.addQuizQuestion = function(questionData) {
+  this.quizQuestions.push(questionData);
+  this.quizCount = this.quizQuestions.length;
+  return this.save();
+};
+
+// Instance method to remove a quiz question
+courseSchema.methods.removeQuizQuestion = function(questionId) {
+  this.quizQuestions = this.quizQuestions.filter(q => q._id.toString() !== questionId);
+  this.quizCount = this.quizQuestions.length;
+  return this.save();
+};
+
+// Instance method to update a quiz question
+courseSchema.methods.updateQuizQuestion = function(questionId, questionData) {
+  const question = this.quizQuestions.id(questionId);
+  if (question) {
+    Object.assign(question, questionData);
+    return this.save();
+  }
+  throw new Error('Quiz question not found');
+};
+
+// Instance method to add a new quiz (with name and multiple questions)
+courseSchema.methods.addQuiz = function(quizData) {
+  this.quizzes.push(quizData);
+  this.quizzesCount = this.quizzes.length;
+  return this.save();
+};
+
+// Instance method to remove a quiz
+courseSchema.methods.removeQuiz = function(quizId) {
+  this.quizzes = this.quizzes.filter(quiz => quiz._id.toString() !== quizId);
+  this.quizzesCount = this.quizzes.length;
+  return this.save();
+};
+
+// Instance method to get a specific quiz
+courseSchema.methods.getQuizById = function(quizId) {
+  return this.quizzes.id(quizId);
+};
+
+// Instance method to update a quiz
+courseSchema.methods.updateQuiz = function(quizId, quizData) {
+  const quiz = this.quizzes.id(quizId);
+  if (quiz) {
+    Object.assign(quiz, quizData);
+    return this.save();
+  }
+  throw new Error('Quiz not found');
 };
 
 module.exports = mongoose.model('Course', courseSchema);

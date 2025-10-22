@@ -27,7 +27,7 @@ const scheduleSchema = new mongoose.Schema({
   },
   date: {
     type: Date,
-    required: true,
+    required: false,
     index: true
   },
   dayOfWeek: {
@@ -171,6 +171,26 @@ scheduleSchema.pre('save', async function(next) {
   if (this.date && !this.dayOfWeek) {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     this.dayOfWeek = days[this.date.getDay()];
+  }
+  
+  // Generate a date from dayOfWeek if date is not provided (for recurring schedules)
+  if (!this.date && this.dayOfWeek) {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const targetDayIndex = days.indexOf(this.dayOfWeek);
+    const today = new Date();
+    const currentDayIndex = today.getDay();
+    
+    // Calculate days until target day (0-6)
+    let daysUntilTarget = targetDayIndex - currentDayIndex;
+    if (daysUntilTarget < 0) {
+      daysUntilTarget += 7; // Next week
+    }
+    
+    // Set the date to the next occurrence of the target day
+    const targetDate = new Date(today);
+    targetDate.setDate(today.getDate() + daysUntilTarget);
+    targetDate.setHours(0, 0, 0, 0); // Reset time to midnight
+    this.date = targetDate;
   }
   
   // Temporarily disable conflict validation for seeding

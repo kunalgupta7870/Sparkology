@@ -6,10 +6,13 @@ const {
   getNotesForTeacher,
   getNoteById,
   updateNote,
-  deleteNote
+  deleteNote,
+  updateNoteAttachments,
+  addNoteAttachments
 } = require('../controllers/noteController');
 const { protect, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
+const { uploadDocument } = require('../controllers/assignmentController');
 
 // Validation middleware
 const validateNote = [
@@ -77,9 +80,9 @@ const validateNoteUpdate = [
 router.use(protect);
 
 // @route   POST /api/notes
-// @desc    Create a new note
+// @desc    Create a new note with optional PDF attachments
 // @access  Private (Teacher)
-router.post('/', authorize(['teacher']), validateNote, createNote);
+router.post('/', authorize(['teacher']), uploadDocument.array('files', 5), createNote);
 
 // @route   GET /api/notes/teacher
 // @desc    Get notes for a teacher
@@ -105,5 +108,15 @@ router.put('/:id', authorize(['teacher']), validateNoteUpdate, updateNote);
 // @desc    Delete note
 // @access  Private (Teacher - Note Creator)
 router.delete('/:id', authorize(['teacher']), deleteNote);
+
+// @route   PUT /api/notes/:id/attachments
+// @desc    Update note attachments
+// @access  Private (Teacher)
+router.put('/:id/attachments', authorize(['teacher']), updateNoteAttachments);
+
+// @route   POST /api/notes/:id/attachments
+// @desc    Add attachments to existing note
+// @access  Private (Teacher)
+router.post('/:id/attachments', authorize(['teacher']), uploadDocument.array('files', 5), addNoteAttachments);
 
 module.exports = router;

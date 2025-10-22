@@ -23,18 +23,47 @@ const photoStorage = new CloudinaryStorage({
   },
 });
 
+// Configure multer for product image uploads
+const productImageStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'master-portal/products',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    resource_type: 'image'
+  },
+});
+
 // Configure multer for video uploads with optimized settings for large files
 const videoStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: {
-    folder: 'master-portal/videos',
-    allowed_formats: ['mp4', 'mov', 'avi', 'mkv', 'webm'],
-    resource_type: 'video',
-    chunk_size: 20000000, // 20MB chunks for faster large file uploads
-    timeout: 600000, // 10 minutes timeout per chunk
-    // Removed eager transformations to speed up uploads
-    // Thumbnails will be generated on-the-fly when needed
+  params: async (req, file) => {
+    return {
+      folder: 'master-portal/videos',
+      allowed_formats: ['mp4', 'mov', 'avi', 'mkv', 'webm'],
+      resource_type: 'video',
+      chunk_size: 20000000, // 20MB chunks for faster large file uploads
+      timeout: 600000, // 10 minutes timeout per chunk
+      // Removed eager transformations to speed up uploads
+      // Thumbnails will be generated on-the-fly when needed
+    };
   },
+});
+
+// Configure multer for document uploads (PDFs, etc.) - Local Storage
+const documentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadPath = require('path').join(__dirname, '../uploads/documents');
+    const fs = require('fs');
+    if (!fs.existsSync(uploadPath)) {
+      fs.mkdirSync(uploadPath, { recursive: true });
+    }
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = require('path').extname(file.originalname);
+    cb(null, 'assignment-' + uniqueSuffix + ext);
+  }
 });
 
 // Multer upload middleware for photos
@@ -42,6 +71,23 @@ const uploadPhoto = multer({
   storage: photoStorage,
   limits: {
     fileSize: 25 * 1024 * 1024, // 25MB limit for photos
+    files: 1
+  },
+  fileFilter: (req, file, cb) => {
+    // Check file type
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  }
+});
+
+// Multer upload middleware for product images
+const uploadProductImage = multer({
+  storage: productImageStorage,
+  limits: {
+    fileSize: 25 * 1024 * 1024, // 25MB limit for product images
     files: 1
   },
   fileFilter: (req, file, cb) => {
@@ -67,6 +113,26 @@ const uploadVideo = multer({
       cb(null, true);
     } else {
       cb(new Error('Only video files are allowed'), false);
+    }
+  }
+});
+
+// Multer upload middleware for documents
+const uploadDocument = multer({
+  storage: documentStorage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit for documents
+    files: 5 // Allow up to 5 files
+  },
+  fileFilter: (req, file, cb) => {
+    // Check file type
+    if (file.mimetype === 'application/pdf' || 
+        file.mimetype === 'application/msword' ||
+        file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        file.mimetype === 'text/plain') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF, DOC, DOCX, and TXT files are allowed'), false);
     }
   }
 });
@@ -111,6 +177,46 @@ const uploadToCloudinary = {
     }
   },
 
+  // Upload document with custom options
+  uploadDocument: async (filePath, options = {}) => {
+    try {
+      const result = await cloudinary.uploader.upload(filePath, {
+        folder: 'master-portal/documents',
+        resource_type: 'raw',
+        timeout: 600000, // 10 minutes timeout
+        ...options
+      });
+      return result;
+    } catch (error) {
+      throw new Error(`Document upload failed: ${error.message}`);
+    }
+  },
+
+  // Upload PDF from buffer (for direct uploads)
+  uploadPdfFromBuffer: async (buffer, filename, options = {}) => {
+    try {
+      return new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder: 'master-portal/documents',
+            resource_type: 'raw',
+            public_id: filename,
+            format: 'pdf',
+            timeout: 600000,
+            ...options
+          },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
+        uploadStream.end(buffer);
+      });
+    } catch (error) {
+      throw new Error(`PDF upload failed: ${error.message}`);
+    }
+  },
+
   // Delete resource from Cloudinary
   deleteResource: async (publicId, resourceType = 'image') => {
     try {
@@ -120,6 +226,18 @@ const uploadToCloudinary = {
       return result;
     } catch (error) {
       throw new Error(`Delete failed: ${error.message}`);
+    }
+  },
+
+  // Delete document from Cloudinary
+  deleteDocument: async (publicId) => {
+    try {
+      const result = await cloudinary.uploader.destroy(publicId, {
+        resource_type: 'raw'
+      });
+      return result;
+    } catch (error) {
+      throw new Error(`Document delete failed: ${error.message}`);
     }
   },
 
@@ -150,12 +268,30 @@ const uploadToCloudinary = {
   // Get video duration
   getVideoDuration: async (publicId) => {
     try {
+      console.log('   🔍 Cloudinary API: Fetching video resource for:', publicId);
+      
       const result = await cloudinary.api.resource(publicId, {
-        resource_type: 'video'
+        resource_type: 'video',
+        image_metadata: true,
+        colors: false,
+        faces: false,
+        quality_analysis: false,
+        accessibility_analysis: false,
+        cinemagraph_analysis: false
       });
-      return result.duration; // Duration in seconds
+      
+      console.log('   ✅ Cloudinary API response received');
+      console.log('   ⏱️ Duration:', result.duration, 'seconds');
+      console.log('   📐 Format:', result.format);
+      console.log('   📦 Bytes:', result.bytes);
+      
+      return result.duration || 0; // Duration in seconds
     } catch (error) {
-      console.error('Error getting video duration:', error);
+      console.error('   ❌ Error getting video duration from Cloudinary API:', error.message);
+      console.error('   📝 Error details:', {
+        statusCode: error.http_code,
+        message: error.message
+      });
       return 0;
     }
   },
@@ -210,13 +346,22 @@ const handleUploadError = (error, req, res, next) => {
     });
   }
   
+  if (error.message.includes('Only PDF, DOC, DOCX, and TXT files are allowed')) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid file type. Only PDF, DOC, DOCX, and TXT files are allowed.'
+    });
+  }
+  
   next(error);
 };
 
 module.exports = {
   cloudinary,
   uploadPhoto,
+  uploadProductImage,
   uploadVideo,
+  uploadDocument,
   uploadToCloudinary,
   handleUploadError
 };

@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const compression = require('compression');
+const path = require('path');
 // const rateLimit = require('express-rate-limit'); // Disabled for file uploads
 const dotenv = require('dotenv');
 const mongoose = require('mongoose');
@@ -18,9 +19,11 @@ const schoolRoutes = require('./routes/schools');
 const userRoutes = require('./routes/users');
 const courseRoutes = require('./routes/courses');
 const productRoutes = require('./routes/products');
-const inventoryRoutes = require('./routes/inventory');
+const schoolProductRoutes = require('./routes/schoolProducts');
 const billingRoutes = require('./routes/billing');
+const adRoutes = require('./routes/ads');
 const photoRoutes = require('./routes/photos');
+const promoCodeRoutes = require('./routes/promoCodes');
 const teacherRoutes = require('./routes/teachers');
 const classRoutes = require('./routes/classes');
 const subjectRoutes = require('./routes/subjects');
@@ -32,6 +35,23 @@ const attendanceRoutes = require('./routes/attendance');
 const messageRoutes = require('./routes/messages');
 const assignmentRoutes = require('./routes/assignments');
 const notificationRoutes = require('./routes/notifications');
+const subjectCourseRoutes = require('./routes/subjectCourses');
+const transportRouteRoutes = require('./routes/transportRoutes');
+const vehicleRoutes = require('./routes/vehicles');
+const driverRoutes = require('./routes/drivers');
+const studentTransportRoutes = require('./routes/studentTransports');
+const examRoutes = require('./routes/exams');
+const feeCategoryRoutes = require('./routes/feeCategories');
+const feeStructureRoutes = require('./routes/feeStructures');
+const feeCollectionRoutes = require('./routes/feeCollections');
+const feeReceiptRoutes = require('./routes/feeReceipts');
+const salaryRoutes = require('./routes/salaries');
+const cartRoutes = require('./routes/cart');
+const orderRoutes = require('./routes/orders');
+const quizRoutes = require('./routes/quizzes');
+const adminQuizRoutes = require('./routes/adminQuizzes');
+const doubtRoutes = require('./routes/doubts');
+const meetingRoutes = require('./routes/meetings');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -45,6 +65,7 @@ const socketHandler = require('./socket/socketHandler');
 const { setSocketIO: setMessageSocketIO } = require('./controllers/messageController');
 const { setSocketIO: setAssignmentSocketIO } = require('./controllers/assignmentController');
 const { setSocketIO: setNoteSocketIO } = require('./controllers/noteController');
+const { setSocketIO: setQuizSocketIO } = require('./controllers/quizController');
 
 const app = express();
 const server = createServer(app);
@@ -77,6 +98,9 @@ app.use(helmet({
   contentSecurityPolicy: false,
 }));
 app.use(compression());
+
+// Serve static files (uploaded documents)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Rate limiting - DISABLED for file uploads
 // const limiter = rateLimit({
@@ -142,6 +166,13 @@ app.use('/api/courses/*/videos/upload', (req, res, next) => {
   next();
 });
 
+app.use('/api/subject-courses/*/videos/upload', (req, res, next) => {
+  // Increase limit for video uploads - 2 hours for very large files
+  req.setTimeout(2 * 60 * 60 * 1000); // 2 hours
+  res.setTimeout(2 * 60 * 60 * 1000);
+  next();
+});
+
 // Logging middleware
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
@@ -187,9 +218,11 @@ app.use('/api/users', userRoutes);
 app.use('/api/schools', schoolRoutes);
 app.use('/api/courses', courseRoutes);
 app.use('/api/products', productRoutes);
-app.use('/api/inventory', inventoryRoutes);
+app.use('/api/school-products', schoolProductRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/photos', photoRoutes);
+app.use('/api/promo-codes', promoCodeRoutes);
+app.use('/api/ads', adRoutes);
 app.use('/api/teachers', teacherRoutes);
 app.use('/api/classes', classRoutes);
 app.use('/api/subjects', subjectRoutes);
@@ -204,6 +237,24 @@ app.use('/api/assignments', assignmentRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/groups', require('./routes/groups'));
 app.use('/api/notes', require('./routes/notes'));
+app.use('/api/meetings', meetingRoutes);
+app.use('/api/subject-courses', subjectCourseRoutes);
+app.use('/api/transport-routes', transportRouteRoutes);
+app.use('/api/vehicles', vehicleRoutes);
+app.use('/api/drivers', driverRoutes);
+app.use('/api/student-transports', studentTransportRoutes);
+app.use('/api/exams', examRoutes);
+app.use('/api/fee-categories', feeCategoryRoutes);
+app.use('/api/fee-structures', feeStructureRoutes);
+app.use('/api/fee-collections', feeCollectionRoutes);
+app.use('/api/fee-receipts', feeReceiptRoutes);
+app.use('/api/salaries', salaryRoutes);
+app.use('/api/cart', cartRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/quizzes', quizRoutes);
+app.use('/api/admin-quizzes', adminQuizRoutes);
+app.use('/api/student-quiz-battle', require('./routes/studentQuizBattle'));
+app.use('/api/doubts', doubtRoutes);
 
 // Error handling middleware
 app.use(notFound);
@@ -334,6 +385,7 @@ console.log('🔌 Main Server: Injecting SocketIO into controllers...');
 setMessageSocketIO(io);
 setAssignmentSocketIO(io);
 setNoteSocketIO(io);
+setQuizSocketIO(io);
 console.log('🔌 Main Server: SocketIO injection completed');
 
 // WebSocket connection handling

@@ -7,13 +7,17 @@ const {
   getChildSchedule,
   getChildAttendance,
   getChildAssignments,
-  getChildTeachers
+  getChildTeachers,
+  getAllParents
 } = require('../controllers/parentController');
 
 const router = express.Router();
 
 // All routes are protected
 router.use(protect);
+
+// School admin routes
+router.get('/', authorize('school_admin'), getAllParents);
 
 // Parent-specific routes
 router.get('/profile', authorize('parent'), getParentProfile);

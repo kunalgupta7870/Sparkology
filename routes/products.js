@@ -2,6 +2,7 @@ const express = require('express');
 const Product = require('../models/Product');
 const School = require('../models/School');
 const { protect, isAdmin } = require('../middleware/auth');
+const { uploadProductImage, handleUploadError } = require('../utils/cloudinary');
 
 const router = express.Router();
 
@@ -110,10 +111,10 @@ const createProduct = async (req, res) => {
       category,
       price,
       stock = 0,
-      minimum = 10,
       schoolId,
       supplier,
-      specifications
+      specifications,
+      images
     } = req.body;
 
     // Verify school exists if schoolId is provided
@@ -134,10 +135,10 @@ const createProduct = async (req, res) => {
       category,
       price,
       stock,
-      minimum,
       schoolId,
       supplier,
-      specifications
+      specifications,
+      images: images || []
     });
 
     // Populate school info
@@ -176,10 +177,10 @@ const updateProduct = async (req, res) => {
       category,
       price,
       stock,
-      minimum,
       status,
       supplier,
-      specifications
+      specifications,
+      images
     } = req.body;
 
     // Update fields
@@ -188,10 +189,10 @@ const updateProduct = async (req, res) => {
     if (category) product.category = category;
     if (price !== undefined) product.price = price;
     if (stock !== undefined) product.stock = stock;
-    if (minimum !== undefined) product.minimum = minimum;
     if (status) product.status = status;
     if (supplier) product.supplier = supplier;
     if (specifications) product.specifications = specifications;
+    if (images !== undefined) product.images = images;
 
     await product.save();
 
@@ -283,7 +284,7 @@ const getLowStockProducts = async (req, res) => {
   try {
     const { schoolId } = req.query;
     
-    const query = { stock: { $lte: '$minimum' } };
+    const query = { $expr: { $lte: ['$stock', '$reorderPoint'] } };
     if (schoolId) query.schoolId = schoolId;
     
     const products = await Product.find(query)
@@ -329,7 +330,7 @@ const getProductStats = async (req, res) => {
     ]);
 
     const lowStockProducts = await Product.countDocuments({
-      $expr: { $lte: ['$stock', '$minimum'] }
+      $expr: { $lte: ['$stock', '$reorderPoint'] }
     });
 
     const recentProducts = await Product.find()
@@ -360,12 +361,105 @@ const getProductStats = async (req, res) => {
   }
 };
 
+// @desc    Purchase product (decrements stock)
+// @route   POST /api/products/:id/purchase
+// @access  Private
+const purchaseProduct = async (req, res) => {
+  try {
+    const { quantity = 1, customer } = req.body;
+    const product = await Product.findById(req.params.id);
+    
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        error: 'Product not found'
+      });
+    }
+
+    // Check if product is active
+    if (product.status !== 'active') {
+      return res.status(400).json({
+        success: false,
+        error: 'Product is not available for purchase'
+      });
+    }
+
+    // Check if sufficient stock is available
+    if (product.stock < quantity) {
+      return res.status(400).json({
+        success: false,
+        error: `Insufficient stock. Only ${product.stock} units available`
+      });
+    }
+
+    // Record the sale (this will automatically decrement stock)
+    await product.recordSale(quantity, product.price, customer || req.user?.name || 'Unknown');
+
+    // Populate and return updated product
+    await product.populate('schoolId', 'name code');
+
+    res.status(200).json({
+      success: true,
+      message: 'Purchase successful',
+      data: {
+        id: product._id,
+        name: product.name,
+        stock: product.stock,
+        stockStatus: product.stockStatus,
+        price: product.price,
+        quantityPurchased: quantity,
+        totalAmount: product.price * quantity
+      }
+    });
+  } catch (error) {
+    console.error('Purchase product error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Server error'
+    });
+  }
+};
+
+// @desc    Upload product image
+// @route   POST /api/products/upload-image
+// @access  Private (Admin only)
+const handleProductImageUpload = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No file uploaded'
+      });
+    }
+
+    // The file is already uploaded to Cloudinary by multer middleware
+    const imageUrl = req.file.path;
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        url: imageUrl,
+        alt: req.body.alt || '',
+        isPrimary: req.body.isPrimary === 'true'
+      }
+    });
+  } catch (error) {
+    console.error('Upload product image error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+};
+
 // Routes
-router.get('/', isAdmin, getProducts);
+router.get('/', getProducts); // Available to all authenticated users (students can browse)
 router.get('/low-stock', isAdmin, getLowStockProducts);
 router.get('/stats', isAdmin, getProductStats);
-router.get('/:id', isAdmin, getProduct);
+router.get('/:id', getProduct); // Available to all authenticated users (students can view details)
 router.post('/', isAdmin, createProduct);
+router.post('/upload-image', isAdmin, uploadProductImage.single('file'), handleUploadError, handleProductImageUpload);
+router.post('/:id/purchase', purchaseProduct); // Available to all authenticated users
 router.put('/:id', isAdmin, updateProduct);
 router.put('/:id/stock', isAdmin, updateStock);
 router.delete('/:id', isAdmin, deleteProduct);

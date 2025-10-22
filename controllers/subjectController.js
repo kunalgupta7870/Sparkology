@@ -80,19 +80,39 @@ const createSubject = async (req, res) => {
     const { name, code, description, teacherId, classId, credits, type } = req.body;
     const schoolId = req.user.schoolId;
 
-    // Check if subject already exists
-    const existingSubject = await Subject.findOne({
-      $or: [
-        { name, schoolId },
-        { code, schoolId }
-      ]
-    });
-
-    if (existingSubject) {
-      return res.status(400).json({
-        success: false,
-        error: 'Subject already exists with this name or code'
+    // Check if subject already exists with same name AND class
+    // Name can be the same across different classes, but not within the same class
+    if (classId) {
+      const existingSubjectInClass = await Subject.findOne({
+        name,
+        classId,
+        schoolId,
+        status: 'active'
       });
+
+      if (existingSubjectInClass) {
+        return res.status(400).json({
+          success: false,
+          error: 'Subject with this name already exists in this class'
+        });
+      }
+    }
+
+    // Check if code already exists in the same class
+    if (code && classId) {
+      const existingCode = await Subject.findOne({
+        code: code.toUpperCase(),
+        classId,
+        schoolId,
+        status: 'active'
+      });
+
+      if (existingCode) {
+        return res.status(400).json({
+          success: false,
+          error: 'Subject code already exists in this class. Please use a different code.'
+        });
+      }
     }
 
     // Verify teacher exists and belongs to the school

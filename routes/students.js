@@ -18,7 +18,9 @@ const {
   getStudentAssignments,
   getStudentNotes,
   getStudentAttendance,
-  getStudentPerformance
+  getStudentPerformance,
+  getStudentPerformanceReport,
+  getStudentExamMarks
 } = require('../controllers/studentController');
 const {
   studentValidation,
@@ -42,11 +44,13 @@ router.get('/schedule', authorize('student'), getStudentSchedule);
 router.get('/assignments', authorize('student'), getStudentAssignments);
 router.get('/notes', authorize('student'), getStudentNotes);
 router.get('/attendance', authorize('student'), getStudentAttendance);
+router.get('/exam-marks', authorize('student'), getStudentExamMarks);
 router.get('/class-contacts', authorize('student'), getClassContacts);
 
 // Student management routes (School Admin and Teachers for their classes)
 router.get('/', authorize('school_admin', 'teacher'), getStudents);
 router.get('/stats', authorize('school_admin'), getStudentStats);
+router.get('/performance-report', authorize('school_admin', 'teacher'), getStudentPerformanceReport);
 router.get('/:id', authorize('school_admin', 'teacher', 'parent'), getStudent);
 router.get('/:id/performance', authorize('school_admin', 'teacher', 'parent'), getStudentPerformance);
 router.post('/', authorize('school_admin'), studentValidation, createStudent);

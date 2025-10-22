@@ -41,15 +41,26 @@ const assignmentSchema = new mongoose.Schema({
     type: String, // Format: "HH:MM" (24-hour format)
     required: false
   },
-  attachments: [{
-    name: String,
-    url: String,
-    type: String, // 'pdf', 'image', 'document', etc.
-    size: Number
-  }],
+  attachments: {
+    type: [{
+      name: { type: String },
+      url: { type: String },
+      type: { type: String }, // 'pdf', 'image', 'document', etc.
+      size: { type: Number },
+      localPath: { type: String }, // Store local file path for deletion
+      cloudinaryPublicId: { type: String }, // Legacy: Cloudinary public ID
+      resourceType: { type: String } // Legacy: Cloudinary resource type
+    }],
+    default: []
+  },
   totalMarks: {
     type: Number,
     default: 0
+  },
+  points: {
+    type: Number,
+    default: 0,
+    min: [0, 'Points cannot be negative']
   },
   status: {
     type: String,
@@ -62,12 +73,23 @@ const assignmentSchema = new mongoose.Schema({
       ref: 'Student'
     },
     submittedAt: Date,
-    attachments: [{
-      name: String,
-      url: String,
-      type: String
-    }],
+    attachments: {
+      type: [{
+        name: { type: String },
+        url: { type: String },
+        type: { type: String },
+        size: { type: Number },
+        localPath: { type: String }, // Store local file path for deletion
+        cloudinaryPublicId: { type: String }, // Legacy: Cloudinary public ID
+        resourceType: { type: String } // Legacy: Cloudinary resource type
+      }],
+      default: []
+    },
     marks: Number,
+    pointsEarned: {
+      type: Number,
+      default: 0
+    },
     feedback: String,
     status: {
       type: String,
@@ -148,12 +170,16 @@ assignmentSchema.statics.getAssignmentsByClass = function(classId, options = {})
 
 // Instance method to add submission
 assignmentSchema.methods.addSubmission = async function(studentId, attachments = [], marks = null) {
+  const now = new Date();
+  const isLate = now > this.dueDate;
+  
   const submission = {
     studentId,
-    submittedAt: new Date(),
+    submittedAt: now,
     attachments,
     marks,
-    status: 'submitted'
+    pointsEarned: isLate ? Math.floor(this.points * 0.5) : this.points, // Half points for late submission
+    status: isLate ? 'late' : 'submitted'
   };
   
   // Check if student already submitted
@@ -185,6 +211,35 @@ assignmentSchema.methods.gradeSubmission = async function(studentId, marks, feed
   submission.status = 'graded';
   
   return this.save();
+};
+
+// Static method to get all Cloudinary public IDs for cleanup
+assignmentSchema.methods.getCloudinaryPublicIds = function() {
+  const publicIds = [];
+  
+  // Add assignment attachment public IDs
+  if (this.attachments) {
+    this.attachments.forEach(attachment => {
+      if (attachment.cloudinaryPublicId) {
+        publicIds.push(attachment.cloudinaryPublicId);
+      }
+    });
+  }
+  
+  // Add submission attachment public IDs
+  if (this.submissions) {
+    this.submissions.forEach(submission => {
+      if (submission.attachments) {
+        submission.attachments.forEach(attachment => {
+          if (attachment.cloudinaryPublicId) {
+            publicIds.push(attachment.cloudinaryPublicId);
+          }
+        });
+      }
+    });
+  }
+  
+  return publicIds;
 };
 
 module.exports = mongoose.model('Assignment', assignmentSchema);

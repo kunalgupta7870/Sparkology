@@ -65,8 +65,10 @@ const subjectSchema = new mongoose.Schema({
 subjectSchema.index({ schoolId: 1 });
 subjectSchema.index({ teacherId: 1 });
 subjectSchema.index({ classId: 1 });
-subjectSchema.index({ name: 1, classId: 1, schoolId: 1 }, { unique: true });
-subjectSchema.index({ code: 1, schoolId: 1 }, { unique: true });
+// Allow same subject name in different classes but not within the same class
+subjectSchema.index({ name: 1, classId: 1, schoolId: 1 }, { unique: true, sparse: true });
+// Allow same subject code in different classes but not within the same class
+subjectSchema.index({ code: 1, classId: 1, schoolId: 1 }, { unique: true, sparse: true });
 
 // Static method to get subjects by school
 subjectSchema.statics.getSubjectsBySchool = function(schoolId) {

@@ -146,7 +146,34 @@ const studentSchema = new mongoose.Schema({
   transferCertificate: {
     type: String,
     default: null
-  }
+  },
+  
+  // Points System
+  totalPoints: {
+    type: Number,
+    default: 0,
+    min: [0, 'Total points cannot be negative']
+  },
+  pointsHistory: [{
+    assignmentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Assignment'
+    },
+    pointsEarned: {
+      type: Number,
+      required: true
+    },
+    earnedAt: {
+      type: Date,
+      default: Date.now
+    },
+    assignmentTitle: String,
+    subjectName: String,
+    isLate: {
+      type: Boolean,
+      default: false
+    }
+  }]
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
@@ -266,6 +293,21 @@ studentSchema.statics.getActiveStudents = function(schoolId = null) {
     query.schoolId = schoolId;
   }
   return this.find(query).populate('classId', 'name section');
+};
+
+// Instance method to add points
+studentSchema.methods.addPoints = async function(assignmentId, pointsEarned, assignmentTitle, subjectName, isLate = false) {
+  this.totalPoints += pointsEarned;
+  
+  this.pointsHistory.push({
+    assignmentId,
+    pointsEarned,
+    assignmentTitle,
+    subjectName,
+    isLate
+  });
+  
+  return this.save();
 };
 
 // Transform function to remove sensitive data

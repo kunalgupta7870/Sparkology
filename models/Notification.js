@@ -15,13 +15,18 @@ const notificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['assignment', 'grade', 'course', 'group', 'achievement', 'general'],
+    enum: ['assignment', 'assignment_submission', 'grade', 'course', 'group', 'achievement', 'general'],
     required: [true, 'Notification type is required']
   },
   recipient: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Student',
+    refPath: 'recipientModel',
     required: [true, 'Recipient is required']
+  },
+  recipientModel: {
+    type: String,
+    enum: ['Student', 'User'],
+    default: 'Student'
   },
   sender: {
     type: mongoose.Schema.Types.ObjectId,

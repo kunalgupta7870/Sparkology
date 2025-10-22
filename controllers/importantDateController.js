@@ -22,8 +22,9 @@ const createImportantDate = async (req, res) => {
       title,
       description,
       date,
+      endDate,
       type,
-      priority = 'medium',
+      priority = 'normal',
       classes = [],
       applyToAllClasses = true,
       startTime,
@@ -35,26 +36,44 @@ const createImportantDate = async (req, res) => {
     const schoolId = req.user.schoolId;
     const createdBy = req.user.id;
 
+    console.log('📅 CREATE - schoolId:', schoolId);
+    console.log('📅 CREATE - applyToAllClasses:', applyToAllClasses);
+    console.log('📅 CREATE - classes:', classes);
+    console.log('📅 CREATE - classes type:', typeof classes);
+    console.log('📅 CREATE - classes is array:', Array.isArray(classes));
+
     // Validate classes if not applying to all
-    if (!applyToAllClasses && classes.length > 0) {
+    if (!applyToAllClasses && classes && classes.length > 0) {
+      console.log('📅 CREATE - Validating classes...');
       const validClasses = await Class.find({
         _id: { $in: classes },
         schoolId,
-        isActive: true
+        status: 'active'
       });
 
+      console.log('📅 CREATE - Valid classes found:', validClasses.length);
+      console.log('📅 CREATE - Valid class IDs:', validClasses.map(c => c._id.toString()));
+      console.log('📅 CREATE - Requested class IDs:', classes);
+
       if (validClasses.length !== classes.length) {
+        console.log('❌ CREATE - Class validation failed!');
+        console.log('❌ CREATE - Expected:', classes.length, 'Found:', validClasses.length);
         return res.status(400).json({
           success: false,
           error: 'One or more classes are invalid'
         });
       }
+      console.log('✅ CREATE - Class validation passed!');
+    } else if (applyToAllClasses) {
+      // When applying to all classes, ensure classes array is empty
+      console.log('📅 Applying to all classes, classes array will be empty');
     }
 
     const importantDate = await ImportantDate.create({
       title,
       description,
       date: new Date(date),
+      endDate: endDate ? new Date(endDate) : undefined,
       type,
       priority,
       schoolId,
@@ -233,6 +252,7 @@ const updateImportantDate = async (req, res) => {
       title,
       description,
       date,
+      endDate,
       type,
       priority,
       classes,
@@ -256,11 +276,11 @@ const updateImportantDate = async (req, res) => {
     }
 
     // Validate classes if not applying to all
-    if (!applyToAllClasses && classes && classes.length > 0) {
+    if (applyToAllClasses === false && classes && classes.length > 0) {
       const validClasses = await Class.find({
         _id: { $in: classes },
         schoolId,
-        isActive: true
+        status: 'active'
       });
 
       if (validClasses.length !== classes.length) {
@@ -269,12 +289,16 @@ const updateImportantDate = async (req, res) => {
           error: 'One or more classes are invalid'
         });
       }
+    } else if (applyToAllClasses === true) {
+      // When applying to all classes, ensure classes array is empty
+      console.log('📅 Applying to all classes for update, classes array will be empty');
     }
 
     // Update fields
     if (title) importantDate.title = title;
     if (description !== undefined) importantDate.description = description;
     if (date) importantDate.date = new Date(date);
+    if (endDate !== undefined) importantDate.endDate = endDate ? new Date(endDate) : null;
     if (type) importantDate.type = type;
     if (priority) importantDate.priority = priority;
     if (classes !== undefined) importantDate.classes = applyToAllClasses ? [] : classes;
@@ -423,7 +447,7 @@ const getCalendarImportantDates = async (req, res) => {
 
     const importantDates = await ImportantDate.find(query)
       .populate('classes', 'name section')
-      .select('title type priority date startTime endTime location applyToAllClasses classes')
+      .select('title type priority date endDate startTime endTime location applyToAllClasses classes')
       .sort({ date: 1, startTime: 1 });
 
     console.log('📅 Found important dates:', importantDates.length);

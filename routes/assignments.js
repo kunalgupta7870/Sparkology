@@ -7,6 +7,11 @@ const {
   updateAssignment,
   deleteAssignment,
   getTeacherClasses,
+  submitAssignment,
+  getMySubmissions,
+  getChildAssignments,
+  getChildAssignmentSubmissions,
+  uploadDocument,
   setSocketIO
 } = require('../controllers/assignmentController');
 const { protect, authorize } = require('../middleware/auth');
@@ -72,6 +77,10 @@ const assignmentUpdateValidation = [
     .optional()
     .isInt({ min: 0 })
     .withMessage('Total marks must be a positive number'),
+  body('points')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Points must be a positive number'),
   body('status')
     .optional()
     .isIn(['active', 'completed', 'cancelled'])
@@ -93,15 +102,34 @@ router.get('/teacher/classes', authorize(['teacher']), getTeacherClasses);
 // @access  Private (Teacher, School Admin)
 router.get('/', authorize(['teacher', 'school_admin']), getAssignments);
 
+// @route   GET /api/assignments/my-submissions
+// @desc    Get student's assignment submissions (MUST be before /:id route)
+// @access  Private (Student)
+router.get('/my-submissions', authorize(['student']), getMySubmissions);
+
+// @route   GET /api/assignments/child/:childId
+// @desc    Get assignments for a specific child (Parent access)
+// @access  Private (Parent)
+router.get('/child/:childId', authorize(['parent']), getChildAssignments);
+
+// @route   GET /api/assignments/child/:childId/submissions
+// @desc    Get assignment submissions for a specific child (Parent access)
+// @access  Private (Parent)
+router.get('/child/:childId/submissions', authorize(['parent']), getChildAssignmentSubmissions);
+
 // @route   GET /api/assignments/:id
 // @desc    Get single assignment
 // @access  Private (Teacher, School Admin, Student, Parent)
 router.get('/:id', authorize(['teacher', 'school_admin', 'student', 'parent']), getAssignment);
 
 // @route   POST /api/assignments
-// @desc    Create new assignment
+// @desc    Create new assignment (with optional file uploads)
 // @access  Private (Teacher, School Admin)
-router.post('/', authorize(['teacher', 'school_admin']), assignmentValidation, createAssignment);
+router.post('/', 
+  authorize(['teacher', 'school_admin']), 
+  uploadDocument.array('files', 5),
+  createAssignment
+);
 
 // @route   PUT /api/assignments/:id
 // @desc    Update assignment
@@ -112,6 +140,11 @@ router.put('/:id', authorize(['teacher', 'school_admin']), assignmentUpdateValid
 // @desc    Delete assignment
 // @access  Private (Teacher, School Admin)
 router.delete('/:id', authorize(['teacher', 'school_admin']), deleteAssignment);
+
+// @route   POST /api/assignments/:id/submit
+// @desc    Submit assignment with PDF files
+// @access  Private (Student)
+router.post('/:id/submit', authorize(['student']), uploadDocument.array('files', 5), submitAssignment);
 
 module.exports = router;
 
