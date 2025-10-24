@@ -100,7 +100,7 @@ app.use(helmet({
 app.use(compression());
 
 // Serve static files (uploaded documents)
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static('/var/www/Sparkology/uploads'));
 
 // Rate limiting - DISABLED for file uploads
 // const limiter = rateLimit({
