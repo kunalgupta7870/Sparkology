@@ -104,8 +104,7 @@ app.use(helmet({
 app.use(compression());
 
 // Serve static files (uploaded documents)
-app.use('/uploads', express.static('/var/www/Sparkology/uploads'));
-
+  app.use('/uploads', express.static('/var/www/Sparkology/uploads'));
 // Rate limiting - DISABLED for file uploads
 // const limiter = rateLimit({
 //   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutes
