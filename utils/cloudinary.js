@@ -11,15 +11,21 @@ cloudinary.config({
   upload_timeout: 600000, // 10 minutes upload timeout
 });
 
-// Configure multer for photo uploads
+// Configure multer for photo/media uploads (supports both images and videos)
 const photoStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: {
-    folder: 'master-portal/photos',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
-    // Removed eager transformations to speed up uploads
-    // Transformations will be applied on-the-fly when accessing images
-    resource_type: 'image'
+  params: async (req, file) => {
+    const isVideo = file.mimetype.startsWith('video/');
+    return {
+      folder: isVideo ? 'master-portal/facts/videos' : 'master-portal/facts/photos',
+      allowed_formats: isVideo ? ['mp4', 'mov', 'avi', 'mkv', 'webm'] : ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+      resource_type: isVideo ? 'video' : 'image',
+      // For videos, use chunked upload for large files
+      ...(isVideo ? {
+        chunk_size: 20000000, // 20MB chunks
+        timeout: 600000 // 10 minutes timeout per chunk
+      } : {})
+    };
   },
 });
 
@@ -28,6 +34,16 @@ const productImageStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'master-portal/products',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    resource_type: 'image'
+  },
+});
+
+// Configure multer for co-curricular post image uploads
+const coCurricularImageStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'master-portal/co-curricular-posts',
     allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
     resource_type: 'image'
   },
@@ -66,11 +82,28 @@ const documentStorage = multer.diskStorage({
   }
 });
 
-// Multer upload middleware for photos
+// Multer upload middleware for photos/videos (fact of the day)
 const uploadPhoto = multer({
   storage: photoStorage,
   limits: {
-    fileSize: 25 * 1024 * 1024, // 25MB limit for photos
+    fileSize: 5 * 1024 * 1024 * 1024, // 5GB limit (allows videos, photos will be much smaller)
+    files: 1
+  },
+  fileFilter: (req, file, cb) => {
+    // Check file type - accept both images and videos
+    if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image and video files are allowed'), false);
+    }
+  }
+});
+
+// Multer upload middleware for product images
+const uploadProductImage = multer({
+  storage: productImageStorage,
+  limits: {
+    fileSize: 25 * 1024 * 1024, // 25MB limit for product images
     files: 1
   },
   fileFilter: (req, file, cb) => {
@@ -83,12 +116,12 @@ const uploadPhoto = multer({
   }
 });
 
-// Multer upload middleware for product images
-const uploadProductImage = multer({
-  storage: productImageStorage,
+// Multer upload middleware for co-curricular post images
+const uploadCoCurricularImages = multer({
+  storage: coCurricularImageStorage,
   limits: {
-    fileSize: 25 * 1024 * 1024, // 25MB limit for product images
-    files: 1
+    fileSize: 5 * 1024 * 1024, // 5MB limit per image
+    files: 10 // Allow up to 10 images
   },
   fileFilter: (req, file, cb) => {
     // Check file type
@@ -338,6 +371,13 @@ const handleUploadError = (error, req, res, next) => {
       message: 'Invalid file type. Only image files are allowed.'
     });
   }
+
+  if (error.message === 'Only image and video files are allowed') {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid file type. Only image and video files are allowed.'
+    });
+  }
   
   if (error.message === 'Only video files are allowed') {
     return res.status(400).json({
@@ -362,6 +402,7 @@ module.exports = {
   uploadProductImage,
   uploadVideo,
   uploadDocument,
+  uploadCoCurricularImages,
   uploadToCloudinary,
   handleUploadError
 };

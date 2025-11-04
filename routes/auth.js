@@ -7,7 +7,9 @@ const {
   updateProfile,
   changePassword,
   logout,
-  createTeacher
+  createTeacher,
+  createLibrarian,
+  createAccountant
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
 
@@ -80,5 +82,7 @@ router.put('/profile', protect, updateProfile);
 router.put('/change-password', protect, changePasswordValidation, changePassword);
 router.post('/logout', protect, logout);
 router.post('/create-teacher', protect, createTeacherValidation, createTeacher);
+router.post('/create-librarian', protect, createTeacherValidation, createLibrarian);
+router.post('/create-accountant', protect, createTeacherValidation, createAccountant);
 
 module.exports = router;

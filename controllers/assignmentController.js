@@ -319,6 +319,28 @@ const createAssignment = async (req, res) => {
       try {
         createdNotifications = await Notification.createAssignmentNotification(assignment, students);
         console.log(`📢 Created assignment notifications for ${students.length} students`);
+        
+        // Send push notifications to students
+        try {
+          const { sendPushNotificationsToUsers } = require('../utils/pushNotifications');
+          const studentIds = students.map(s => s._id.toString());
+          await sendPushNotificationsToUsers(
+            studentIds,
+            'Student',
+            'New Assignment',
+            `${assignment.title} - Due ${new Date(assignment.dueDate).toLocaleDateString()}`,
+            {
+              type: 'assignment',
+              assignmentId: assignment._id.toString(),
+              relatedId: assignment._id.toString(),
+              relatedType: 'assignment'
+            }
+          );
+          console.log(`📱 Sent push notifications to ${students.length} students`);
+        } catch (pushError) {
+          console.error('Error sending push notifications:', pushError);
+          // Don't fail if push notifications fail
+        }
       } catch (notificationError) {
         console.error('Error creating assignment notifications:', notificationError);
         // Don't fail the assignment creation if notifications fail
@@ -697,7 +719,15 @@ const submitAssignment = async (req, res) => {
     await assignment.addSubmission(studentId, attachments);
 
     // Award points to student
-    const isLate = new Date() > assignment.dueDate;
+    // Compare dates at day level (not including time) to check if same day
+    const dueDateOnly = new Date(assignment.dueDate);
+    dueDateOnly.setHours(0, 0, 0, 0);
+    const nowDateOnly = new Date();
+    nowDateOnly.setHours(0, 0, 0, 0);
+    
+    // Only mark as late if submitted AFTER the due date (not on the due date)
+    const isLate = nowDateOnly > dueDateOnly;
+    
     await student.addPoints(
       assignmentId,
       isLate ? Math.floor(assignment.points * 0.5) : assignment.points,

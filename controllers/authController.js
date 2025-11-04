@@ -404,6 +404,130 @@ const createTeacher = async (req, res) => {
   }
 };
 
+// @desc    Create librarian
+// @route   POST /api/auth/create-librarian
+// @access  Private (School Admin only)
+const createLibrarian = async (req, res) => {
+  try {
+    // Check for validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
+    const { name, email, password, phone } = req.body;
+    const schoolId = req.user.schoolId; // Get schoolId from authenticated user
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        error: 'A user with this email already exists. Please use a different email address.'
+      });
+    }
+
+    // Create librarian
+    const librarian = await User.create({
+      name,
+      email: email.toLowerCase(),
+      password,
+      phone,
+      role: 'librarian',
+      schoolId
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Librarian created successfully',
+      data: {
+        librarian: {
+          id: librarian._id,
+          name: librarian.name,
+          email: librarian.email,
+          phone: librarian.phone,
+          role: librarian.role,
+          schoolId: librarian.schoolId,
+          isActive: librarian.isActive,
+          createdAt: librarian.createdAt
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Create librarian error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error during librarian creation'
+    });
+  }
+};
+
+// @desc    Create accountant
+// @route   POST /api/auth/create-accountant
+// @access  Private (School Admin only)
+const createAccountant = async (req, res) => {
+  try {
+    // Check for validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
+    const { name, email, password, phone } = req.body;
+    const schoolId = req.user.schoolId; // Get schoolId from authenticated user
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        error: 'A user with this email already exists. Please use a different email address.'
+      });
+    }
+
+    // Create accountant
+    const accountant = await User.create({
+      name,
+      email: email.toLowerCase(),
+      password,
+      phone,
+      role: 'accountant',
+      schoolId
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Accountant created successfully',
+      data: {
+        accountant: {
+          id: accountant._id,
+          name: accountant.name,
+          email: accountant.email,
+          phone: accountant.phone,
+          role: accountant.role,
+          schoolId: accountant.schoolId,
+          isActive: accountant.isActive,
+          createdAt: accountant.createdAt
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Create accountant error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error during accountant creation'
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -411,5 +535,7 @@ module.exports = {
   updateProfile,
   changePassword,
   logout,
-  createTeacher
+  createTeacher,
+  createLibrarian,
+  createAccountant
 };

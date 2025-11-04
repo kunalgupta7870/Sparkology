@@ -171,7 +171,15 @@ assignmentSchema.statics.getAssignmentsByClass = function(classId, options = {})
 // Instance method to add submission
 assignmentSchema.methods.addSubmission = async function(studentId, attachments = [], marks = null) {
   const now = new Date();
-  const isLate = now > this.dueDate;
+  
+  // Compare dates at day level (not including time) to check if same day
+  const dueDateOnly = new Date(this.dueDate);
+  dueDateOnly.setHours(0, 0, 0, 0);
+  const nowDateOnly = new Date(now);
+  nowDateOnly.setHours(0, 0, 0, 0);
+  
+  // Only mark as late if submitted AFTER the due date (not on the due date)
+  const isLate = nowDateOnly > dueDateOnly;
   
   const submission = {
     studentId,

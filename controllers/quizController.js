@@ -308,6 +308,28 @@ const createQuiz = async (req, res) => {
           
           console.log(`📢 Created quiz notifications for ${students.length} students`);
 
+          // Send push notifications to students
+          try {
+            const { sendPushNotificationsToUsers } = require('../utils/pushNotifications');
+            const studentIds = students.map(s => s._id.toString());
+            await sendPushNotificationsToUsers(
+              studentIds,
+              'Student',
+              'New Quiz Available',
+              `New quiz "${quiz.name}" is now available for ${quiz.subjectId.name}`,
+              {
+                type: 'quiz',
+                quizId: quiz._id.toString(),
+                relatedId: quiz._id.toString(),
+                relatedType: 'quiz'
+              }
+            );
+            console.log(`📱 Sent push notifications for quiz to ${students.length} students`);
+          } catch (pushError) {
+            console.error('Error sending push notifications for quiz:', pushError);
+            // Don't fail if push notifications fail
+          }
+
           // Emit WebSocket event to notify students about new quiz
           if (io) {
             students.forEach(student => {

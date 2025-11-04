@@ -48,10 +48,14 @@ const feeReceiptRoutes = require('./routes/feeReceipts');
 const salaryRoutes = require('./routes/salaries');
 const cartRoutes = require('./routes/cart');
 const orderRoutes = require('./routes/orders');
+const paymentRoutes = require('./routes/payments');
 const quizRoutes = require('./routes/quizzes');
 const adminQuizRoutes = require('./routes/adminQuizzes');
 const doubtRoutes = require('./routes/doubts');
 const meetingRoutes = require('./routes/meetings');
+const bookRoutes = require('./routes/books');
+const bookBorrowingRoutes = require('./routes/bookBorrowings');
+const coCurricularRoutes = require('./routes/coCurricular');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -151,11 +155,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// Handle large file uploads
+// Handle large file uploads (photos and videos for fact of the day)
 app.use('/api/photos/upload', (req, res, next) => {
-  // Increase limit for photo uploads
-  req.setTimeout(10 * 60 * 1000); // 10 minutes
-  res.setTimeout(10 * 60 * 1000);
+  // Increase limit for photo/video uploads - videos can be large
+  req.setTimeout(2 * 60 * 60 * 1000); // 2 hours for large video uploads
+  res.setTimeout(2 * 60 * 60 * 1000);
   next();
 });
 
@@ -251,10 +255,14 @@ app.use('/api/fee-receipts', feeReceiptRoutes);
 app.use('/api/salaries', salaryRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/payments', paymentRoutes);
 app.use('/api/quizzes', quizRoutes);
 app.use('/api/admin-quizzes', adminQuizRoutes);
 app.use('/api/student-quiz-battle', require('./routes/studentQuizBattle'));
 app.use('/api/doubts', doubtRoutes);
+app.use('/api/books', bookRoutes);
+app.use('/api/book-borrowings', bookBorrowingRoutes);
+app.use('/api/co-curricular', coCurricularRoutes);
 
 // Error handling middleware
 app.use(notFound);

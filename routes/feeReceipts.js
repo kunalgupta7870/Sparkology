@@ -9,24 +9,24 @@ const {
   getReceiptsByDateRange,
   getReceiptsByStudent
 } = require('../controllers/feeReceiptController');
-const { protect } = require('../middleware/auth');
+const { protect, authorize } = require('../middleware/auth');
 
 const router = express.Router();
 
 // All routes are protected
 router.use(protect);
 
-// Special routes
-router.get('/stats', getReceiptStats);
-router.get('/date-range', getReceiptsByDateRange);
-router.get('/student/:studentId', getReceiptsByStudent);
-router.get('/number/:receiptNumber', getFeeReceiptByNumber);
+// Special routes - allow school_admin and accountant
+router.get('/stats', authorize('school_admin', 'accountant'), getReceiptStats);
+router.get('/date-range', authorize('school_admin', 'accountant'), getReceiptsByDateRange);
+router.get('/student/:studentId', authorize('school_admin', 'accountant'), getReceiptsByStudent);
+router.get('/number/:receiptNumber', authorize('school_admin', 'accountant'), getFeeReceiptByNumber);
 
-// Standard routes
-router.get('/', getFeeReceipts);
-router.get('/:id', getFeeReceipt);
-router.post('/', createFeeReceipt);
-router.put('/:id/cancel', cancelFeeReceipt);
+// Standard routes - allow school_admin and accountant
+router.get('/', authorize('school_admin', 'accountant'), getFeeReceipts);
+router.get('/:id', authorize('school_admin', 'accountant'), getFeeReceipt);
+router.post('/', authorize('school_admin', 'accountant'), createFeeReceipt);
+router.put('/:id/cancel', authorize('school_admin', 'accountant'), cancelFeeReceipt);
 
 module.exports = router;
 

@@ -6,7 +6,8 @@ const {
   markNotificationsAsRead,
   markAllNotificationsAsRead,
   deleteNotification,
-  createNotification
+  createNotification,
+  registerPushToken
 } = require('../controllers/notificationController');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -19,6 +20,9 @@ router.put('/:id/read', protect, authorize(['student']), markNotificationAsRead)
 router.put('/mark-read', protect, authorize(['student']), markNotificationsAsRead);
 router.put('/mark-all-read', protect, authorize(['student']), markAllNotificationsAsRead);
 router.delete('/:id', protect, authorize(['student']), deleteNotification);
+
+// Push token registration (for students and teachers)
+router.post('/register-push-token', protect, registerPushToken);
 
 // Teacher/Admin routes
 router.post('/', protect, authorize(['teacher', 'school_admin']), createNotification);

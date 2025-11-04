@@ -47,8 +47,8 @@ router.get('/attendance', authorize('student'), getStudentAttendance);
 router.get('/exam-marks', authorize('student'), getStudentExamMarks);
 router.get('/class-contacts', authorize('student'), getClassContacts);
 
-// Student management routes (School Admin and Teachers for their classes)
-router.get('/', authorize('school_admin', 'teacher'), getStudents);
+// Student management routes (School Admin, Teachers, and Librarians for library operations)
+router.get('/', authorize('school_admin', 'teacher', 'librarian'), getStudents);
 router.get('/stats', authorize('school_admin'), getStudentStats);
 router.get('/performance-report', authorize('school_admin', 'teacher'), getStudentPerformanceReport);
 router.get('/:id', authorize('school_admin', 'teacher', 'parent'), getStudent);

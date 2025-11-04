@@ -1,16 +1,56 @@
 const SubjectCourseProgress = require('../models/SubjectCourseProgress');
 const SubjectCourse = require('../models/SubjectCourse');
 
+// Ensure incorrect legacy indexes are removed (once per process)
+let subjectProgressIndexChecked = false;
+async function ensureSubjectProgressIndexes() {
+  if (subjectProgressIndexChecked) return;
+  try {
+    const indexes = await SubjectCourseProgress.collection.indexes();
+    const bad = indexes.find(ix => ix.name === 'userId_1_courseId_1');
+    if (bad) {
+      try {
+        await SubjectCourseProgress.collection.dropIndex('userId_1_courseId_1');
+        console.log('🧹 Dropped legacy index userId_1_courseId_1 from subjectcourseprogresses');
+      } catch (e) {
+        console.log('ℹ️ Could not drop legacy index (may already be gone):', e.message);
+      }
+    }
+  } catch (e) {
+    console.log('ℹ️ Index check failed (non-fatal):', e.message);
+  } finally {
+    subjectProgressIndexChecked = true;
+  }
+}
+
 // @desc    Get subject course progress for current user
 // @route   GET /api/subject-courses/:subjectCourseId/progress
 // @access  Private
 exports.getSubjectCourseProgress = async (req, res) => {
   try {
+    await ensureSubjectProgressIndexes();
     const { subjectCourseId } = req.params;
     const userId = req.user._id;
     const userModel = req.user.role === 'student' ? 'Student' : req.user.role === 'parent' ? 'Parent' : 'User';
     
     console.log(`📊 Getting progress for subject course ${subjectCourseId}, user ${userId}`);
+    
+    // Validate subjectCourseId format
+    if (!subjectCourseId || !subjectCourseId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid subject course ID format'
+      });
+    }
+    
+    // Check if subject course exists
+    const subjectCourse = await SubjectCourse.findById(subjectCourseId);
+    if (!subjectCourse) {
+      return res.status(404).json({
+        success: false,
+        error: 'Subject course not found'
+      });
+    }
     
     let progress = await SubjectCourseProgress.findOne({ userId, subjectCourseId });
     
@@ -24,9 +64,26 @@ exports.getSubjectCourseProgress = async (req, res) => {
       console.log('📊 Created new subject course progress record');
     }
     
+    // Check if course has videos - if not, return empty progress
+    if (!subjectCourse.videos || subjectCourse.videos.length === 0) {
+      console.log('📊 Course has no videos, returning empty progress');
+      return res.status(200).json({
+        success: true,
+        data: {
+          ...progress.toObject(),
+          hasVideos: false,
+          message: 'This course has no videos yet'
+        }
+      });
+    }
+    
     res.status(200).json({
       success: true,
-      data: progress
+      data: {
+        ...progress.toObject(),
+        hasVideos: true,
+        totalVideos: subjectCourse.videos.length
+      }
     });
   } catch (error) {
     console.error('Error getting subject course progress:', error);
@@ -43,6 +100,7 @@ exports.getSubjectCourseProgress = async (req, res) => {
 // @access  Private
 exports.markVideoComplete = async (req, res) => {
   try {
+    await ensureSubjectProgressIndexes();
     const { subjectCourseId, videoId } = req.params;
     const { watchDuration } = req.body;
     const userId = req.user._id;
@@ -84,6 +142,7 @@ exports.markVideoComplete = async (req, res) => {
 // @access  Private
 exports.saveVideoPosition = async (req, res) => {
   try {
+    await ensureSubjectProgressIndexes();
     const { subjectCourseId, videoId } = req.params;
     const { position, totalWatchTime } = req.body;
     const userId = req.user._id;
@@ -124,6 +183,7 @@ exports.saveVideoPosition = async (req, res) => {
 // @access  Private
 exports.getVideoPosition = async (req, res) => {
   try {
+    await ensureSubjectProgressIndexes();
     const { subjectCourseId, videoId } = req.params;
     const userId = req.user._id;
     const userModel = req.user.role === 'student' ? 'Student' : req.user.role === 'parent' ? 'Parent' : 'User';

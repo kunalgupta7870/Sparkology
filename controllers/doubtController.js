@@ -9,11 +9,11 @@ const path = require('path');
 // @route   GET /api/doubts
 // @access  Private
 const getDoubts = asyncHandler(async (req, res) => {
-  const { filter, subjectCourse, status } = req.query;
+  const { filter, subjectCourse, status, subjectName, className } = req.query;
   
   let query = {};
   
-  // For students, only show doubts from their school
+  // For students, only show doubts from their school and class
   if (req.user.role === 'student') {
     // For students, req.user._id is the student ID directly
     const student = await Student.findById(req.user._id).populate('classId', 'name');
@@ -23,10 +23,24 @@ const getDoubts = asyncHandler(async (req, res) => {
         error: 'Student profile not found'
       });
     }
-    query.schoolId = student.schoolId;
     
     // Only show answered doubts to students
-    query.status = 'answered';
+    const baseQuery = { status: 'answered' };
+    
+    // Filter by student's class - show doubts for their class (both student-asked and admin-created)
+    const studentClassName = student.classId?.name || student.className || '';
+    if (studentClassName) {
+      baseQuery.className = studentClassName;
+    }
+    
+    // Show doubts from their school OR admin-created doubts without schoolId (for their class)
+    query = {
+      ...baseQuery,
+      $or: [
+        { schoolId: student.schoolId },
+        { schoolId: null, createdByAdmin: { $exists: true } } // Admin-created doubts visible to all students of that class
+      ]
+    };
   }
   
   // For admin/master/school admin, show all doubts from their schools
@@ -37,6 +51,16 @@ const getDoubts = asyncHandler(async (req, res) => {
     // Apply status filter if provided
     if (status) {
       query.status = status;
+    }
+    
+    // Filter by subject name if provided
+    if (subjectName) {
+      query.subjectName = { $regex: subjectName, $options: 'i' };
+    }
+    
+    // Filter by class name if provided
+    if (className) {
+      query.className = { $regex: className, $options: 'i' };
     }
   }
   
@@ -60,6 +84,7 @@ const getDoubts = asyncHandler(async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(100)
       .populate('student', 'name email className')
+      .populate('createdByAdmin', 'name email')
       .populate('subjectCourse', 'title subjectName className')
       .populate('answer.answeredBy', 'name email');
   }
@@ -77,6 +102,7 @@ const getDoubts = asyncHandler(async (req, res) => {
 const getDoubt = asyncHandler(async (req, res) => {
   const doubt = await Doubt.findById(req.params.id)
     .populate('student', 'name email className')
+    .populate('createdByAdmin', 'name email')
     .populate('subjectCourse', 'title subjectName className')
     .populate('answer.answeredBy', 'name email');
   
@@ -185,6 +211,98 @@ const createDoubt = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Create admin doubt
+// @route   POST /api/doubts/admin-create
+// @access  Private (Admin, Master, School Admin)
+const createAdminDoubt = asyncHandler(async (req, res) => {
+  const { subjectCourseId, question, answer, className } = req.body;
+  
+  // Verify user is admin/master/school admin
+  if (req.user.role !== 'admin' && req.user.role !== 'master' && req.user.role !== 'schoolAdmin') {
+    return res.status(403).json({
+      success: false,
+      error: 'Not authorized to create admin doubts'
+    });
+  }
+  
+  // Verify subject course exists
+  const subjectCourse = await SubjectCourse.findById(subjectCourseId);
+  if (!subjectCourse) {
+    return res.status(404).json({
+      success: false,
+      error: 'Subject course not found'
+    });
+  }
+  
+  // Use provided className or get from subjectCourse
+  const doubtClassName = className || subjectCourse.className || '';
+  if (!doubtClassName) {
+    return res.status(400).json({
+      success: false,
+      error: 'Class name is required'
+    });
+  }
+  
+  // Get schoolId from user or subject course's school
+  let schoolId = req.user.schoolId;
+  // If master/admin without schoolId, try to get from subject course if it has schoolId
+  // For now, master/admin can create doubts for any school (set schoolId to null or get from context)
+  // For school admin, use their schoolId
+  
+  const doubtData = {
+    createdByAdmin: req.user._id,
+    subjectCourse: subjectCourseId,
+    subjectName: subjectCourse.subjectName,
+    question,
+    schoolId: schoolId || null, // For master/admin, may be null
+    className: doubtClassName,
+    status: answer ? 'answered' : 'pending'
+  };
+  
+  // If answer is provided, add it
+  if (answer && answer.trim()) {
+    doubtData.answer = {
+      text: answer.trim(),
+      answeredBy: req.user._id,
+      answeredAt: new Date()
+    };
+    doubtData.status = 'answered';
+  }
+  
+  // Handle document upload if file is present
+  if (req.file) {
+    try {
+      const relativePath = req.file.path.replace(/\\/g, '/');
+      doubtData.document = {
+        url: `/${relativePath}`,
+        publicId: req.file.filename,
+        name: req.file.originalname
+      };
+      console.log('Document saved locally:', doubtData.document);
+    } catch (error) {
+      console.error('Document upload error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to upload document'
+      });
+    }
+  }
+  
+  const doubt = await Doubt.create(doubtData);
+  
+  // Populate the response
+  const populatedDoubt = await Doubt.findById(doubt._id)
+    .populate('createdByAdmin', 'name email')
+    .populate('subjectCourse', 'title subjectName className')
+    .populate('answer.answeredBy', 'name email');
+  
+  res.status(201).json({
+    success: true,
+    message: 'Admin doubt created successfully',
+    data: populatedDoubt
+  });
+});
+
 // @desc    Answer a doubt
 // @route   PUT /api/doubts/:id/answer
 // @access  Private (Admin, Master, School Admin)
@@ -223,6 +341,7 @@ const answerDoubt = asyncHandler(async (req, res) => {
   // Populate the response
   const updatedDoubt = await Doubt.findById(doubt._id)
     .populate('student', 'name email')
+    .populate('createdByAdmin', 'name email')
     .populate('subjectCourse', 'title subjectName')
     .populate('answer.answeredBy', 'name email');
   
@@ -433,6 +552,7 @@ module.exports = {
   getDoubts,
   getDoubt,
   createDoubt,
+  createAdminDoubt,
   answerDoubt,
   toggleBookmark,
   markHelpful,

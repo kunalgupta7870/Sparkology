@@ -1,5 +1,6 @@
 const Notification = require('../models/Notification');
 const Student = require('../models/Student');
+const DeviceToken = require('../models/DeviceToken');
 const { validationResult } = require('express-validator');
 
 // @desc    Get student notifications
@@ -269,6 +270,28 @@ const createNotification = async (req, res) => {
 
     const createdNotifications = await Notification.insertMany(notifications);
 
+    // Send push notifications to recipients
+    try {
+      const { sendPushNotificationsToUsers } = require('../utils/pushNotifications');
+      const recipientIds = validStudents.map(s => s._id.toString());
+      await sendPushNotificationsToUsers(
+        recipientIds,
+        'Student',
+        title,
+        message,
+        {
+          type,
+          relatedId: relatedId ? relatedId.toString() : null,
+          relatedType,
+          actionUrl
+        }
+      );
+      console.log(`📱 Sent push notifications to ${recipientIds.length} students`);
+    } catch (pushError) {
+      console.error('Error sending push notifications:', pushError);
+      // Don't fail if push notifications fail
+    }
+
     res.status(201).json({
       success: true,
       message: 'Notifications created successfully',
@@ -286,6 +309,50 @@ const createNotification = async (req, res) => {
   }
 };
 
+// @desc    Register push token
+// @route   POST /api/notifications/register-push-token
+// @access  Private
+const registerPushToken = async (req, res) => {
+  try {
+    const { expoPushToken, platform = 'android', deviceId = null } = req.body;
+    const userId = req.user._id;
+    const userRole = req.user.role;
+
+    if (!expoPushToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'Expo push token is required'
+      });
+    }
+
+    // Determine user model based on role
+    const userModel = userRole === 'student' ? 'Student' : 'User';
+
+    // Register or update the token
+    const token = await DeviceToken.registerToken(
+      userId,
+      userModel,
+      expoPushToken,
+      platform,
+      deviceId
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Push token registered successfully',
+      data: {
+        token: token._id
+      }
+    });
+  } catch (error) {
+    console.error('Register push token error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while registering push token'
+    });
+  }
+};
+
 module.exports = {
   getStudentNotifications,
   getNotificationCount,
@@ -293,5 +360,6 @@ module.exports = {
   markNotificationsAsRead,
   markAllNotificationsAsRead,
   deleteNotification,
-  createNotification
+  createNotification,
+  registerPushToken
 };

@@ -25,6 +25,13 @@ const subjectCourseSchema = new mongoose.Schema({
     trim: true,
     maxlength: [100, 'Class name cannot exceed 100 characters']
   },
+  // Skill awarded upon completion
+  skill: {
+    type: String,
+    trim: true,
+    maxlength: [100, 'Skill cannot exceed 100 characters'],
+    default: ''
+  },
   // Learning objectives
   learningObjectives: [{
     type: String,

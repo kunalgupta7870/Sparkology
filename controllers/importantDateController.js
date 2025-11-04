@@ -447,7 +447,7 @@ const getCalendarImportantDates = async (req, res) => {
 
     const importantDates = await ImportantDate.find(query)
       .populate('classes', 'name section')
-      .select('title type priority date endDate startTime endTime location applyToAllClasses classes')
+      .select('title description type priority date endDate startTime endTime location applyToAllClasses classes')
       .sort({ date: 1, startTime: 1 });
 
     console.log('📅 Found important dates:', importantDates.length);

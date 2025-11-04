@@ -41,6 +41,9 @@ const {
   hasPurchasedCourse,
   getMyPurchasedCourses
 } = require('../controllers/coursePurchaseController');
+const Course = require('../models/Course');
+const Order = require('../models/Order');
+const { createOrder, verifyPayment, fetchPayment } = require('../utils/razorpay');
 const { protect, authorize } = require('../middleware/auth');
 const { uploadVideo: uploadVideoMiddleware, uploadDocument, uploadPhoto, handleUploadError } = require('../utils/cloudinary');
 const { body, param } = require('express-validator');
@@ -484,6 +487,163 @@ router.delete('/:courseId/reviews/:reviewId',
 router.post('/:courseId/reviews/:reviewId/helpful',
   authorize(['student', 'parent', 'teacher']),
   markReviewHelpful
+);
+
+// ============================================
+// COURSE PURCHASE ROUTES (with Razorpay)
+// ============================================
+
+// @desc    Purchase course (creates payment order or verifies payment)
+// @route   POST /api/courses/:id/purchase
+// @access  Private
+const purchaseCourse = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, billingAddress } = req.body;
+    const userId = req.user._id;
+
+    // Find the course
+    const course = await Course.findById(id);
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        error: 'Course not found'
+      });
+    }
+
+    // Check if course has a price
+    if (!course.price || course.price <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Course is free and does not require payment'
+      });
+    }
+
+    // If payment verification data is provided, verify and complete purchase
+    if (razorpay_order_id && razorpay_payment_id && razorpay_signature) {
+      // Verify payment signature
+      const isVerified = verifyPayment(razorpay_order_id, razorpay_payment_id, razorpay_signature);
+      
+      if (!isVerified) {
+        return res.status(400).json({
+          success: false,
+          error: 'Payment verification failed'
+        });
+      }
+
+      // Fetch payment details from Razorpay
+      const paymentDetails = await fetchPayment(razorpay_payment_id);
+      
+      if (paymentDetails.status !== 'captured' && paymentDetails.status !== 'authorized') {
+        return res.status(400).json({
+          success: false,
+          error: `Payment status is ${paymentDetails.status}, expected captured or authorized`
+        });
+      }
+
+      // Check if already purchased
+      const existingOrder = await Order.findOne({
+        userId,
+        'items.courseId': id,
+        paymentStatus: 'paid'
+      });
+
+      if (existingOrder) {
+        return res.status(400).json({
+          success: false,
+          error: 'Course already purchased'
+        });
+      }
+
+      const userModel = req.user.role === 'student' ? 'Student' : req.user.role === 'parent' ? 'Parent' : 'User';
+
+      // Create order record
+      const order = await Order.create({
+        userId,
+        userModel,
+        items: [{
+          courseId: course._id,
+          type: 'course',
+          name: course.name,
+          price: course.price,
+          quantity: 1,
+          subtotal: course.price
+        }],
+        billingAddress: billingAddress || {
+          name: req.user.name || '',
+          email: req.user.email || ''
+        },
+        paymentMethod: {
+          type: 'razorpay',
+          name: 'Razorpay'
+        },
+        pricing: {
+          subtotal: course.price,
+          discount: 0,
+          paymentFee: 0,
+          total: course.price
+        },
+        status: 'completed',
+        paymentStatus: 'paid',
+        transactionId: razorpay_payment_id,
+        completedAt: new Date()
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Purchase successful',
+        data: {
+          courseId: course._id,
+          courseName: course.name,
+          price: course.price,
+          order: order
+        }
+      });
+    }
+
+    // If no payment data, create Razorpay order for payment
+    // Create short receipt (Razorpay requires max 40 characters)
+    const receipt = `CRS${course._id.toString().slice(-8)}${Date.now().toString().slice(-8)}`;
+    
+    const order = await createOrder(course.price, course.currency || 'INR', {
+      receipt: receipt,
+      notes: {
+        type: 'course',
+        courseId: course._id.toString(),
+        courseName: course.name,
+        userId: userId.toString()
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Payment order created successfully',
+      data: {
+        orderId: order.id,
+        amount: order.amount / 100,
+        currency: order.currency,
+        keyId: process.env.RAZORPAY_KEY_ID,
+        courseId: course._id,
+        courseName: course.name,
+        coursePrice: course.price
+      }
+    });
+  } catch (error) {
+    console.error('Purchase course error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to process course purchase'
+    });
+  }
+};
+
+// @route   POST /api/courses/:id/purchase
+// @desc    Purchase course (creates payment order or verifies payment)
+// @access  Private
+router.post('/:id/purchase',
+  authorize(['student', 'parent', 'teacher']),
+  validateCourseId,
+  purchaseCourse
 );
 
 module.exports = router;

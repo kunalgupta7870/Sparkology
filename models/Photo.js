@@ -14,8 +14,22 @@ const factOfTheDaySchema = new mongoose.Schema({
   },
   imageUrl: {
     type: String,
-    required: [true, 'Image URL is required'],
+    required: function() {
+      return !this.videoUrl; // Required if videoUrl is not provided
+    },
     trim: true
+  },
+  videoUrl: {
+    type: String,
+    required: function() {
+      return !this.imageUrl; // Required if imageUrl is not provided
+    },
+    trim: true
+  },
+  mediaType: {
+    type: String,
+    enum: ['image', 'video'],
+    default: 'image'
   },
   thumbnailUrl: {
     type: String,
@@ -146,9 +160,14 @@ factOfTheDaySchema.virtual('formattedDimensions').get(function() {
 
 // Pre-save middleware to generate thumbnail URL if not provided
 factOfTheDaySchema.pre('save', function(next) {
-  if (this.imageUrl && !this.thumbnailUrl) {
-    // Generate thumbnail URL from Cloudinary URL with proper transformation syntax
-    this.thumbnailUrl = this.imageUrl.replace('/upload/', '/upload/w_300,h_200,c_fill/');
+  if (!this.thumbnailUrl) {
+    if (this.videoUrl) {
+      // Generate thumbnail URL for video (Cloudinary video thumbnail)
+      this.thumbnailUrl = this.videoUrl.replace('/upload/', '/upload/w_300,h_200,c_fill,so_0/') + '.jpg';
+    } else if (this.imageUrl) {
+      // Generate thumbnail URL from Cloudinary URL with proper transformation syntax
+      this.thumbnailUrl = this.imageUrl.replace('/upload/', '/upload/w_300,h_200,c_fill/');
+    }
   }
   next();
 });

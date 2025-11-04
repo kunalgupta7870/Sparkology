@@ -4,7 +4,12 @@ const doubtSchema = new mongoose.Schema({
   student: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Student',
-    required: [true, 'Student is required']
+    required: false // Optional for admin-created doubts
+  },
+  createdByAdmin: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false // Only set when created by admin
   },
   subjectCourse: {
     type: mongoose.Schema.Types.ObjectId,
@@ -70,7 +75,7 @@ const doubtSchema = new mongoose.Schema({
   schoolId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'School',
-    required: [true, 'School ID is required']
+    required: false // Optional for admin-created doubts (master/admin can create for multiple schools)
   },
   className: {
     type: String,
@@ -104,6 +109,7 @@ doubtSchema.statics.getPopularDoubts = function(filters = {}) {
   })
     .sort({ helpful: -1, views: -1 })
     .populate('student', 'name email')
+    .populate('createdByAdmin', 'name email')
     .populate('subjectCourse', 'title subjectName')
     .populate('answer.answeredBy', 'name email');
 };
@@ -116,6 +122,7 @@ doubtSchema.statics.getRecentDoubts = function(filters = {}) {
   })
     .sort({ 'answer.answeredAt': -1 })
     .populate('student', 'name email')
+    .populate('createdByAdmin', 'name email')
     .populate('subjectCourse', 'title subjectName')
     .populate('answer.answeredBy', 'name email');
 };
@@ -128,6 +135,7 @@ doubtSchema.statics.getPendingDoubts = function(filters = {}) {
   })
     .sort({ createdAt: -1 })
     .populate('student', 'name email className')
+    .populate('createdByAdmin', 'name email')
     .populate('subjectCourse', 'title subjectName className');
 };
 

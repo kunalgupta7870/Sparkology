@@ -6,6 +6,7 @@ const {
   getDoubts,
   getDoubt,
   createDoubt,
+  createAdminDoubt,
   answerDoubt,
   toggleBookmark,
   markHelpful,
@@ -52,6 +53,7 @@ router.get('/saved', protect, getSavedDoubts);
 router.get('/', protect, getDoubts);
 router.get('/:id', protect, getDoubt);
 router.post('/', protect, upload.single('document'), createDoubt);
+router.post('/admin-create', protect, upload.single('document'), createAdminDoubt);
 router.put('/:id/answer', protect, answerDoubt);
 router.put('/:id/bookmark', protect, toggleBookmark);
 router.put('/:id/helpful', protect, markHelpful);

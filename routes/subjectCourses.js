@@ -124,6 +124,12 @@ const validateVideoId = [
     .withMessage('Invalid video ID')
 ];
 
+const validateSubjectCourseId = [
+  param('subjectCourseId')
+    .isMongoId()
+    .withMessage('Invalid subject course ID')
+];
+
 // All routes require authentication
 router.use(protect);
 
@@ -359,6 +365,7 @@ router.post('/:courseId/quizzes/:quizId/submit',
 // @desc    Get subject course progress for current user
 // @access  Private
 router.get('/:subjectCourseId/progress',
+  validateSubjectCourseId,
   authorize(['student', 'parent', 'teacher']),
   getSubjectCourseProgress
 );

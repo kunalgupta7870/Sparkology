@@ -517,9 +517,9 @@ const loginUser = async (req, res) => {
 // @access  Private
 const verifyUser = async (req, res) => {
   try {
-    // Get school info if user is school admin
+    // Get school info if user has schoolId (school_admin, teacher, librarian, accountant)
     let schoolInfo = null;
-    if (req.user.role === 'school_admin' && req.user.schoolId) {
+    if (req.user.schoolId) {
       schoolInfo = await School.findById(req.user.schoolId).select('name address status');
     }
 

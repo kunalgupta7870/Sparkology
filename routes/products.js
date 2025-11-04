@@ -1,8 +1,10 @@
 const express = require('express');
 const Product = require('../models/Product');
 const School = require('../models/School');
+const Order = require('../models/Order');
 const { protect, isAdmin } = require('../middleware/auth');
 const { uploadProductImage, handleUploadError } = require('../utils/cloudinary');
+const { createOrder, verifyPayment, fetchPayment } = require('../utils/razorpay');
 
 const router = express.Router();
 
@@ -361,12 +363,12 @@ const getProductStats = async (req, res) => {
   }
 };
 
-// @desc    Purchase product (decrements stock)
+// @desc    Create Razorpay order for product purchase
 // @route   POST /api/products/:id/purchase
 // @access  Private
 const purchaseProduct = async (req, res) => {
   try {
-    const { quantity = 1, customer } = req.body;
+    const { quantity = 1, customer, razorpay_order_id, razorpay_payment_id, razorpay_signature, billingAddress } = req.body;
     const product = await Product.findById(req.params.id);
     
     if (!product) {
@@ -392,23 +394,117 @@ const purchaseProduct = async (req, res) => {
       });
     }
 
-    // Record the sale (this will automatically decrement stock)
-    await product.recordSale(quantity, product.price, customer || req.user?.name || 'Unknown');
+    // If payment verification data is provided, verify and complete purchase
+    if (razorpay_order_id && razorpay_payment_id && razorpay_signature) {
+      // Verify payment signature
+      const isVerified = verifyPayment(razorpay_order_id, razorpay_payment_id, razorpay_signature);
+      
+      if (!isVerified) {
+        return res.status(400).json({
+          success: false,
+          error: 'Payment verification failed'
+        });
+      }
 
-    // Populate and return updated product
-    await product.populate('schoolId', 'name code');
+      // Fetch payment details from Razorpay
+      const paymentDetails = await fetchPayment(razorpay_payment_id);
+      
+      if (paymentDetails.status !== 'captured' && paymentDetails.status !== 'authorized') {
+        return res.status(400).json({
+          success: false,
+          error: `Payment status is ${paymentDetails.status}, expected captured or authorized`
+        });
+      }
+
+      const userId = req.user._id;
+      const totalAmount = product.price * quantity;
+
+      // Update stock
+      await product.updateStock(quantity, 'subtract');
+      await product.recordSale(quantity, product.price, customer || req.user?.name || 'Unknown');
+
+      // Create order record
+      const order = await Order.create({
+        userId,
+        userModel: req.user.role === 'student' ? 'Student' : req.user.role === 'parent' ? 'Parent' : 'User',
+        items: [{
+          productId: product._id,
+          type: 'product',
+          name: product.name,
+          price: product.price,
+          quantity: quantity,
+          subtotal: totalAmount
+        }],
+        billingAddress: billingAddress || {
+          name: req.user.name || '',
+          email: req.user.email || ''
+        },
+        paymentMethod: {
+          type: 'razorpay',
+          name: 'Razorpay'
+        },
+        pricing: {
+          subtotal: totalAmount,
+          discount: 0,
+          paymentFee: 0,
+          total: totalAmount
+        },
+        status: 'completed',
+        paymentStatus: 'paid',
+        transactionId: razorpay_payment_id,
+        completedAt: new Date()
+      });
+
+      // Populate and return updated product
+      await product.populate('schoolId', 'name code');
+
+      return res.status(200).json({
+        success: true,
+        message: 'Purchase successful',
+        data: {
+          id: product._id,
+          name: product.name,
+          stock: product.stock,
+          stockStatus: product.stockStatus,
+          price: product.price,
+          quantityPurchased: quantity,
+          totalAmount: totalAmount,
+          order: order
+        }
+      });
+    }
+
+    // If no payment data, create Razorpay order for payment
+    const totalAmount = product.price * quantity;
+    const userId = req.user._id;
+
+    // Create short receipt (Razorpay requires max 40 characters)
+    const receipt = `PRD${product._id.toString().slice(-8)}${Date.now().toString().slice(-8)}`;
+    
+    const order = await createOrder(totalAmount, 'INR', {
+      receipt: receipt,
+      notes: {
+        type: 'product',
+        productId: product._id.toString(),
+        productName: product.name,
+        quantity: quantity.toString(),
+        userId: userId.toString()
+      }
+    });
 
     res.status(200).json({
       success: true,
-      message: 'Purchase successful',
+      message: 'Payment order created successfully',
       data: {
-        id: product._id,
-        name: product.name,
-        stock: product.stock,
-        stockStatus: product.stockStatus,
-        price: product.price,
-        quantityPurchased: quantity,
-        totalAmount: product.price * quantity
+        orderId: order.id,
+        amount: order.amount / 100,
+        currency: order.currency,
+        keyId: process.env.RAZORPAY_KEY_ID,
+        productId: product._id,
+        productName: product.name,
+        quantity: quantity,
+        unitPrice: product.price,
+        totalAmount: totalAmount
       }
     });
   } catch (error) {
@@ -459,7 +555,7 @@ router.get('/stats', isAdmin, getProductStats);
 router.get('/:id', getProduct); // Available to all authenticated users (students can view details)
 router.post('/', isAdmin, createProduct);
 router.post('/upload-image', isAdmin, uploadProductImage.single('file'), handleUploadError, handleProductImageUpload);
-router.post('/:id/purchase', purchaseProduct); // Available to all authenticated users
+router.post('/:id/purchase', purchaseProduct); // Available to all authenticated users (creates payment order or verifies payment)
 router.put('/:id', isAdmin, updateProduct);
 router.put('/:id/stock', isAdmin, updateStock);
 router.delete('/:id', isAdmin, deleteProduct);

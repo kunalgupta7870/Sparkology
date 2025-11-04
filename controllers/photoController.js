@@ -28,11 +28,13 @@ const uploadPhoto = asyncHandler(async (req, res) => {
       cloudinaryId: req.file.filename
     });
 
-    // Check file size
-    if (req.file.size > 25 * 1024 * 1024) { // 25MB
+    // Check file size based on media type
+    const isVideo = req.file.mimetype.startsWith('video/');
+    const maxSize = isVideo ? 5 * 1024 * 1024 * 1024 : 25 * 1024 * 1024; // 5GB for videos, 25MB for images
+    if (req.file.size > maxSize) {
       return res.status(413).json({
         success: false,
-        message: 'File too large. Maximum size is 25MB for facts.'
+        message: `File too large. Maximum size is ${isVideo ? '5GB' : '25MB'} for ${isVideo ? 'videos' : 'photos'}.`
       });
     }
 
@@ -43,8 +45,7 @@ const uploadPhoto = asyncHandler(async (req, res) => {
     const factData = {
       title: title || req.file.originalname,
       description: description || '',
-      imageUrl: req.file.path,
-      thumbnailUrl: req.file.path.replace('/upload/', '/upload/w_300,h_200,c_fill/'),
+      mediaType: isVideo ? 'video' : 'image',
       cloudinaryId: req.file.filename,
       originalFilename: req.file.originalname,
       fileSize: req.file.size,
@@ -55,6 +56,16 @@ const uploadPhoto = asyncHandler(async (req, res) => {
       width: req.file.width || 0,
       height: req.file.height || 0
     };
+
+    // Set URL based on media type
+    if (isVideo) {
+      factData.videoUrl = req.file.path;
+      // Generate thumbnail for video (Cloudinary will generate this automatically)
+      factData.thumbnailUrl = req.file.path.replace('/upload/', '/upload/w_300,h_200,c_fill,so_0/') + '.jpg';
+    } else {
+      factData.imageUrl = req.file.path;
+      factData.thumbnailUrl = req.file.path.replace('/upload/', '/upload/w_300,h_200,c_fill/');
+    }
     
     // Only add schoolId if user has one (admin users don't have schoolId)
     if (user.schoolId || user.school_id) {
@@ -269,7 +280,8 @@ const deletePhoto = asyncHandler(async (req, res) => {
     // Delete from Cloudinary
     if (fact.cloudinaryId) {
       try {
-        await uploadToCloudinary.deleteResource(fact.cloudinaryId);
+        const resourceType = fact.mediaType === 'video' ? 'video' : 'image';
+        await uploadToCloudinary.deleteResource(fact.cloudinaryId, resourceType);
       } catch (cloudinaryError) {
         console.error('Cloudinary delete error:', cloudinaryError);
         // Continue with database deletion even if Cloudinary deletion fails
