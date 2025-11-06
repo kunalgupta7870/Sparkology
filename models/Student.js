@@ -173,6 +173,12 @@ const studentSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     }
+  }],
+  
+  // Documents/PDFs
+  pdfs: [{
+    type: String,
+    trim: true
   }]
 }, {
   timestamps: true,

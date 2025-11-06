@@ -93,9 +93,40 @@ const getStudent = async (req, res) => {
       });
     }
 
+    // Fetch parent information linked to this student
+    const parents = await Parent.find({
+      $or: [
+        { studentIds: student._id },
+        { studentId: student._id }
+      ],
+      schoolId: student.schoolId
+    }).select('name email phone parentType');
+
+    // Organize parent info by type
+    const parentInfo = {};
+    parents.forEach(parent => {
+      if (parent.parentType === 'father') {
+        parentInfo.fatherName = parent.name;
+        parentInfo.fatherEmail = parent.email;
+        parentInfo.fatherPhone = parent.phone;
+      } else if (parent.parentType === 'mother') {
+        parentInfo.motherName = parent.name;
+        parentInfo.motherEmail = parent.email;
+        parentInfo.motherPhone = parent.phone;
+      } else if (parent.parentType === 'guardian') {
+        parentInfo.guardianName = parent.name;
+        parentInfo.guardianEmail = parent.email;
+        parentInfo.guardianPhone = parent.phone;
+      }
+    });
+
+    // Convert student to object and add parent info
+    const studentData = student.toObject();
+    studentData.parentInfo = parentInfo;
+
     res.status(200).json({
       success: true,
-      data: student
+      data: studentData
     });
   } catch (error) {
     console.error('Get student error:', error);
@@ -134,7 +165,8 @@ const createStudent = async (req, res) => {
       phone,
       bloodGroup,
       medicalInfo,
-      previousSchool
+      previousSchool,
+      pdfs
     } = req.body;
 
     const schoolId = req.user.schoolId;
@@ -182,7 +214,8 @@ const createStudent = async (req, res) => {
       phone,
       bloodGroup,
       medicalInfo: medicalInfo || {},
-      previousSchool
+      previousSchool,
+      pdfs: pdfs || []
     });
     console.log('✅ Student created with ID:', student._id, 'classId:', student.classId);
 

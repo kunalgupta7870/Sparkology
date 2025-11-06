@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const compression = require('compression');
 const path = require('path');
+const fs = require('fs');
 // const rateLimit = require('express-rate-limit'); // Disabled for file uploads
 const dotenv = require('dotenv');
 const mongoose = require('mongoose');
@@ -27,8 +28,12 @@ const promoCodeRoutes = require('./routes/promoCodes');
 const teacherRoutes = require('./routes/teachers');
 const classRoutes = require('./routes/classes');
 const subjectRoutes = require('./routes/subjects');
+const syllabusRoutes = require('./routes/syllabus');
 const studentRoutes = require('./routes/students');
 const parentRoutes = require('./routes/parents');
+const admissionsRoutes = require('./routes/admissions');
+const announcementsRoutes = require('./routes/announcements');
+const inventoryRoutes = require('./routes/inventory');
 const scheduleRoutes = require('./routes/schedules');
 const teacherAttendanceRoutes = require('./routes/teacherAttendance');
 const attendanceRoutes = require('./routes/attendance');
@@ -96,6 +101,18 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 5000;
 
+// Ensure uploads/documents folder exists at startup
+const uploadsPath = path.join(__dirname, 'uploads');
+const documentsPath = path.join(__dirname, 'uploads', 'documents');
+if (!fs.existsSync(uploadsPath)) {
+  fs.mkdirSync(uploadsPath, { recursive: true });
+  console.log('✅ Created uploads folder');
+}
+if (!fs.existsSync(documentsPath)) {
+  fs.mkdirSync(documentsPath, { recursive: true });
+  console.log('✅ Created uploads/documents folder');
+}
+
 // Security middleware - Configured for file uploads
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
@@ -105,6 +122,7 @@ app.use(compression());
 
 // Serve static files (uploaded documents)
   app.use('/uploads', express.static('/var/www/Sparkology/uploads'));
+
 // Rate limiting - DISABLED for file uploads
 // const limiter = rateLimit({
 //   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutes
@@ -119,7 +137,7 @@ app.use(compression());
 
 // CORS configuration
 const corsOptions = {
-  origin: '*', // Allow all origins for file uploads
+  origin: true, // Allow all origins for file uploads
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Access-Control-Request-Method', 'Access-Control-Request-Headers'],
@@ -229,6 +247,7 @@ app.use('/api/ads', adRoutes);
 app.use('/api/teachers', teacherRoutes);
 app.use('/api/classes', classRoutes);
 app.use('/api/subjects', subjectRoutes);
+app.use('/api/syllabus', syllabusRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/parents', parentRoutes);
 app.use('/api/schedules', scheduleRoutes);
@@ -236,6 +255,9 @@ app.use('/api/attendance', attendanceRoutes);
 app.use('/api/teacher-attendance', teacherAttendanceRoutes);
 app.use('/api/important-dates', require('./routes/importantDates'));
 app.use('/api/messages', messageRoutes);
+app.use('/api/announcements', announcementsRoutes);
+app.use('/api/admissions', admissionsRoutes);
+app.use('/api/inventory', inventoryRoutes);
 app.use('/api/assignments', assignmentRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/groups', require('./routes/groups'));
@@ -462,7 +484,7 @@ const startServer = async () => {
   // Try to connect to database (non-blocking)
   connectDB();
   
-  server.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, '0.0.0.0' () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📊 Environment: ${process.env.NODE_ENV}`);
     console.log(`🌐 Health check: http://localhost:${PORT}/health`);

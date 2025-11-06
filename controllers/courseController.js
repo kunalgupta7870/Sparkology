@@ -111,15 +111,23 @@ const createCourse = asyncHandler(async (req, res) => {
       courseData.schoolId = user.schoolId || user.school_id;
     }
 
-    // Validate preview videos - only one allowed
+    // Validate preview videos - only one allowed (check both legacy videos and chapter videos)
+    const allPreviewVideos = [];
     if (courseData.videos && Array.isArray(courseData.videos)) {
-      const previewVideos = courseData.videos.filter(v => v.isPreview);
-      if (previewVideos.length > 1) {
-        return res.status(400).json({
-          success: false,
-          message: 'Only one preview video is allowed per course'
-        });
-      }
+      allPreviewVideos.push(...courseData.videos.filter(v => v.isPreview));
+    }
+    if (courseData.chapters && Array.isArray(courseData.chapters)) {
+      courseData.chapters.forEach(chapter => {
+        if (chapter.videos && Array.isArray(chapter.videos)) {
+          allPreviewVideos.push(...chapter.videos.filter(v => v.isPreview));
+        }
+      });
+    }
+    if (allPreviewVideos.length > 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Only one preview video is allowed per course'
+      });
     }
 
     // Set isPaid based on price
@@ -178,15 +186,45 @@ const updateCourse = asyncHandler(async (req, res) => {
       });
     }
 
-    // Validate preview videos if videos are being updated
-    if (req.body.videos && Array.isArray(req.body.videos)) {
-      const previewVideos = req.body.videos.filter(v => v.isPreview);
-      if (previewVideos.length > 1) {
-        return res.status(400).json({
-          success: false,
-          message: 'Only one preview video is allowed per course'
-        });
-      }
+    // Validate preview videos ONLY if videos are actually being updated
+    // When chapters are sent, they contain the full structure, so validate only what's being sent
+    const allPreviewVideos = [];
+    
+    // Check updated videos if provided
+    if (req.body.videos !== undefined && Array.isArray(req.body.videos)) {
+      allPreviewVideos.push(...req.body.videos.filter(v => v.isPreview));
+    }
+    
+    // Check chapters if provided (chapters contain full structure including videos)
+    if (req.body.chapters !== undefined && Array.isArray(req.body.chapters)) {
+      req.body.chapters.forEach(chapter => {
+        if (chapter.videos && Array.isArray(chapter.videos)) {
+          allPreviewVideos.push(...chapter.videos.filter(v => v.isPreview));
+        }
+      });
+    }
+    
+    // Only check existing videos/chapters if we're NOT replacing them
+    // If videos field is not in request, check existing videos
+    if (req.body.videos === undefined && course.videos && Array.isArray(course.videos)) {
+      allPreviewVideos.push(...course.videos.filter(v => v.isPreview));
+    }
+    
+    // If chapters field is not in request, check existing chapters
+    if (req.body.chapters === undefined && course.chapters && Array.isArray(course.chapters)) {
+      course.chapters.forEach(chapter => {
+        if (chapter.videos && Array.isArray(chapter.videos)) {
+          allPreviewVideos.push(...chapter.videos.filter(v => v.isPreview));
+        }
+      });
+    }
+    
+    // Only validate if we found any preview videos to check
+    if (allPreviewVideos.length > 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Only one preview video is allowed per course'
+      });
     }
 
     // Update course

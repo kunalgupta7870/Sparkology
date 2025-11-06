@@ -126,6 +126,14 @@ const createPost = asyncHandler(async (req, res) => {
   }
 
   // Handle image uploads if provided - files are already uploaded to Cloudinary
+  // Students can only upload 1 photo per CCA post
+  if (req.files && req.files.length > 1) {
+    return res.status(400).json({
+      success: false,
+      error: 'Only 1 photo is allowed per post'
+    });
+  }
+
   const images = [];
   if (req.files && req.files.length > 0) {
     console.log('📸 Co-curricular Post: Processing', req.files.length, 'files from Cloudinary');
@@ -223,6 +231,14 @@ const updatePost = asyncHandler(async (req, res) => {
   }
 
   // Handle image uploads if provided - files are already uploaded to Cloudinary
+  // Students can only upload 1 photo per CCA post
+  if (req.files && req.files.length > 1) {
+    return res.status(400).json({
+      success: false,
+      error: 'Only 1 photo is allowed per post'
+    });
+  }
+
   if (req.files && req.files.length > 0) {
     // Delete old images from Cloudinary
     if (post.images && post.images.length > 0) {

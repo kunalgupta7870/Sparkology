@@ -78,7 +78,12 @@ const documentStorage = multer.diskStorage({
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const ext = require('path').extname(file.originalname);
-    cb(null, 'assignment-' + uniqueSuffix + ext);
+    // Use original filename (sanitized) for student documents, preserving extension
+    const baseName = require('path').basename(file.originalname, ext);
+    const sanitizedBaseName = baseName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    // Ensure extension is preserved (especially for PDFs)
+    const finalName = sanitizedBaseName + ext.toLowerCase();
+    cb(null, 'student-' + uniqueSuffix + '-' + finalName);
   }
 });
 
@@ -121,7 +126,7 @@ const uploadCoCurricularImages = multer({
   storage: coCurricularImageStorage,
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB limit per image
-    files: 10 // Allow up to 10 images
+    files: 1 // Allow only 1 image per post
   },
   fileFilter: (req, file, cb) => {
     // Check file type

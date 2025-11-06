@@ -163,7 +163,177 @@ const courseSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
-  // Video lessons for the course
+  // Chapters - organized course content (videos, notes, quizzes grouped by chapter)
+  chapters: [{
+    name: {
+      type: String,
+      required: [true, 'Chapter name is required'],
+      trim: true,
+      maxlength: [200, 'Chapter name cannot exceed 200 characters']
+    },
+    description: {
+      type: String,
+      trim: true,
+      maxlength: [1000, 'Chapter description cannot exceed 1000 characters']
+    },
+    order: {
+      type: Number,
+      required: [true, 'Chapter order is required'],
+      min: [1, 'Order must be at least 1']
+    },
+    videos: [{
+      title: {
+        type: String,
+        required: [true, 'Video title is required'],
+        trim: true,
+        maxlength: [200, 'Video title cannot exceed 200 characters']
+      },
+      description: {
+        type: String,
+        trim: true,
+        maxlength: [1000, 'Video description cannot exceed 1000 characters']
+      },
+      videoUrl: {
+        type: String,
+        required: [true, 'Video URL is required'],
+        trim: true
+      },
+      thumbnail: {
+        type: String,
+        trim: true
+      },
+      duration: {
+        type: Number, // in seconds
+        default: 0
+      },
+      order: {
+        type: Number,
+        required: [true, 'Video order is required'],
+        min: [1, 'Order must be at least 1']
+      },
+      isPublished: {
+        type: Boolean,
+        default: true
+      },
+      isPreview: {
+        type: Boolean,
+        default: false // Only one video can be marked as preview/free
+      },
+      uploadedAt: {
+        type: Date,
+        default: Date.now
+      },
+      viewCount: {
+        type: Number,
+        default: 0
+      }
+    }],
+    notes: [{
+      title: {
+        type: String,
+        required: [true, 'Note title is required'],
+        trim: true,
+        maxlength: [200, 'Note title cannot exceed 200 characters']
+      },
+      description: {
+        type: String,
+        trim: true,
+        maxlength: [500, 'Note description cannot exceed 500 characters']
+      },
+      fileUrl: {
+        type: String,
+        required: [true, 'File URL is required'],
+        trim: true
+      },
+      fileSize: {
+        type: Number, // in bytes
+        default: 0
+      },
+      uploadedAt: {
+        type: Date,
+        default: Date.now
+      },
+      order: {
+        type: Number,
+        default: 1
+      }
+    }],
+    quizzes: [{
+      title: {
+        type: String,
+        required: [true, 'Quiz title is required'],
+        trim: true,
+        maxlength: [200, 'Quiz title cannot exceed 200 characters']
+      },
+      description: {
+        type: String,
+        trim: true,
+        maxlength: [500, 'Quiz description cannot exceed 500 characters']
+      },
+      timeLimit: {
+        type: Number, // in minutes
+        default: 30,
+        min: [1, 'Time limit must be at least 1 minute']
+      },
+      passingScore: {
+        type: Number, // percentage (0-100)
+        default: 60,
+        min: [0, 'Passing score must be at least 0'],
+        max: [100, 'Passing score cannot exceed 100']
+      },
+      questions: [{
+        question: {
+          type: String,
+          required: [true, 'Question is required'],
+          trim: true,
+          maxlength: [500, 'Question cannot exceed 500 characters']
+        },
+        options: {
+          type: [{
+            type: String,
+            required: true,
+            trim: true,
+            maxlength: [200, 'Option cannot exceed 200 characters']
+          }],
+          validate: {
+            validator: function(v) {
+              return v && v.length === 4;
+            },
+            message: 'Exactly 4 options are required'
+          }
+        },
+        correctAnswer: {
+          type: Number,
+          required: [true, 'Correct answer index is required'],
+          min: [0, 'Answer index must be at least 0'],
+          max: [3, 'Answer index must be at most 3']
+        },
+        explanation: {
+          type: String,
+          trim: true,
+          maxlength: [500, 'Explanation cannot exceed 500 characters']
+        },
+        difficulty: {
+          type: String,
+          enum: ['easy', 'medium', 'hard'],
+          default: 'medium'
+        },
+        order: {
+          type: Number,
+          default: 1
+        }
+      }],
+      createdAt: {
+        type: Date,
+        default: Date.now
+      }
+    }],
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  // Video lessons for the course (legacy - kept for backward compatibility)
   videos: [{
     title: {
       type: String,
