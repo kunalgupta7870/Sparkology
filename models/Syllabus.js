@@ -1,71 +1,5 @@
 const mongoose = require('mongoose');
 
-const chapterSchema = new mongoose.Schema({
-  title: {
-    type: String,
-    required: [true, 'Chapter title is required'],
-    trim: true
-  },
-  description: {
-    type: String,
-    trim: true
-  },
-  order: {
-    type: Number,
-    required: true
-  },
-  topics: [{
-    title: {
-      type: String,
-      required: true,
-      trim: true
-    },
-    description: {
-      type: String,
-      trim: true
-    },
-    duration: {
-      hours: { type: Number, default: 0 },
-      minutes: { type: Number, default: 0 }
-    },
-    learningObjectives: [{
-      type: String,
-      trim: true
-    }],
-    teachingMethodology: [{
-      type: String,
-      enum: ['lecture', 'practical', 'discussion', 'project', 'activity', 'presentation', 'other']
-    }],
-    resources: [{
-      title: {
-        type: String,
-        required: true,
-        trim: true
-      },
-      type: {
-        type: String,
-        enum: ['textbook', 'reference', 'website', 'video', 'worksheet', 'assessment', 'other'],
-        default: 'other'
-      },
-      url: String,
-      description: String
-    }],
-    status: {
-      type: String,
-      enum: ['pending', 'in-progress', 'completed'],
-      default: 'pending'
-    },
-    completionDate: Date
-  }],
-  startDate: Date,
-  endDate: Date,
-  status: {
-    type: String,
-    enum: ['pending', 'in-progress', 'completed'],
-    default: 'pending'
-  }
-});
-
 const syllabusSchema = new mongoose.Schema({
   classId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -92,106 +26,54 @@ const syllabusSchema = new mongoose.Schema({
     required: [true, 'Academic year is required'],
     trim: true
   },
-  title: {
+  syllabusContent: {
     type: String,
-    required: [true, 'Syllabus title is required'],
+    required: [true, 'Syllabus content is required'],
     trim: true
   },
-  description: {
-    type: String,
-    trim: true
-  },
-  chapters: [chapterSchema],
-  courseObjectives: [{
+  topics: [{
+    topic: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    description: {
+      type: String,
+      trim: true
+    },
+    order: {
+      type: Number,
+      default: 0
+    }
+  }],
+  learningObjectives: [{
     type: String,
     trim: true
   }],
-  prerequisites: [{
+  assessmentCriteria: {
     type: String,
     trim: true
-  }],
-  courseMaterials: [{
+  },
+  resources: [{
+    title: {
+      type: String,
+      required: true,
+      trim: true
+    },
     type: {
       type: String,
-      enum: ['textbook', 'reference', 'workbook', 'digital'],
-      required: true
+      enum: ['textbook', 'reference', 'website', 'video', 'other'],
+      default: 'other'
     },
-    title: String,
-    author: String,
-    publisher: String,
-    edition: String,
-    isbn: String,
-    required: {
-      type: Boolean,
-      default: true
+    url: {
+      type: String,
+      trim: true
     }
   }],
-  assessmentPattern: {
-    continuous: {
-      weightage: {
-        type: Number,
-        min: 0,
-        max: 100
-      },
-      components: [{
-        type: {
-          type: String,
-          enum: ['quiz', 'assignment', 'project', 'presentation', 'class-participation', 'other']
-        },
-        weightage: Number,
-        minimumMarks: Number
-      }]
-    },
-    termEnd: {
-      weightage: {
-        type: Number,
-        min: 0,
-        max: 100
-      },
-      components: [{
-        type: {
-          type: String,
-          enum: ['written', 'practical', 'viva', 'project', 'other']
-        },
-        weightage: Number,
-        minimumMarks: Number
-      }]
-    }
-  },
-  documents: [{
-    name: String,
-    description: String,
-    type: {
-      type: String,
-      enum: ['syllabus', 'curriculum', 'lesson-plan', 'assessment-plan', 'other']
-    },
-    url: String,
-    uploadedAt: {
-      type: Date,
-      default: Date.now
-    }
-  }],
-  approvalStatus: {
-    status: {
-      type: String,
-      enum: ['draft', 'pending', 'approved', 'rejected'],
-      default: 'draft'
-    },
-    approvedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    approvalDate: Date,
-    comments: String
-  },
   status: {
     type: String,
-    enum: ['active', 'inactive', 'archived'],
+    enum: ['active', 'inactive', 'draft'],
     default: 'active'
-  },
-  version: {
-    type: Number,
-    default: 1
   },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -209,33 +91,13 @@ const syllabusSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
-syllabusSchema.index({ schoolId: 1, classId: 1, subjectId: 1, academicYear: 1 });
-syllabusSchema.index({ schoolId: 1, 'approvalStatus.status': 1 });
-syllabusSchema.index({ teacherId: 1, status: 1 });
-
-// Virtual for progress tracking
-syllabusSchema.virtual('progress').get(function() {
-  if (!this.chapters || this.chapters.length === 0) return 0;
-  
-  const completedTopics = this.chapters.reduce((acc, chapter) => {
-    return acc + (chapter.topics || []).filter(topic => topic.status === 'completed').length;
-  }, 0);
-  
-  const totalTopics = this.chapters.reduce((acc, chapter) => {
-    return acc + (chapter.topics || []).length;
-  }, 0);
-  
-  return totalTopics > 0 ? (completedTopics / totalTopics) * 100 : 0;
-});
-
-// Virtual for total duration
-syllabusSchema.virtual('totalDuration').get(function() {
-  return this.chapters.reduce((acc, chapter) => {
-    return acc + (chapter.topics || []).reduce((topicAcc, topic) => {
-      return topicAcc + (topic.duration.hours || 0) + (topic.duration.minutes || 0) / 60;
-    }, 0);
-  }, 0);
-});
+syllabusSchema.index({ schoolId: 1 });
+syllabusSchema.index({ classId: 1 });
+syllabusSchema.index({ subjectId: 1 });
+syllabusSchema.index({ teacherId: 1 });
+syllabusSchema.index({ academicYear: 1 });
+// Ensure unique syllabus per class-subject-teacher-academic year combination
+// Note: teacherId can be null, so we use sparse index
 syllabusSchema.index({ classId: 1, subjectId: 1, teacherId: 1, academicYear: 1, schoolId: 1 }, { unique: true, sparse: true });
 
 // Static method to get syllabus by class and subject
