@@ -39,6 +39,16 @@ const productImageStorage = new CloudinaryStorage({
   },
 });
 
+// Configure multer storage for inventory images (allows multiple images)
+const inventoryImageStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'school-portal/inventory',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    resource_type: 'image'
+  },
+});
+
 // Configure multer for co-curricular post image uploads
 const coCurricularImageStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
@@ -113,6 +123,22 @@ const uploadProductImage = multer({
   },
   fileFilter: (req, file, cb) => {
     // Check file type
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  }
+});
+
+// Multer upload middleware for inventory images (allow up to 5 images)
+const uploadInventoryImages = multer({
+  storage: inventoryImageStorage,
+  limits: {
+    fileSize: 25 * 1024 * 1024, // 25MB per image
+    files: 5
+  },
+  fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
@@ -409,5 +435,6 @@ module.exports = {
   uploadDocument,
   uploadCoCurricularImages,
   uploadToCloudinary,
+  uploadInventoryImages,
   handleUploadError
 };

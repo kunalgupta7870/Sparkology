@@ -18,6 +18,7 @@ const createAnnouncement = async (req, res) => {
     const announcement = await Announcement.create({
       title,
       content,
+      // keep backward compatible: announcements stored with publishDate; also accept explicit date
       date: date ? new Date(date) : undefined,
       type,
       priority,
@@ -27,29 +28,32 @@ const createAnnouncement = async (req, res) => {
       attachments,
       createdBy
     });
-
-    // If announcement has a date, create a corresponding ImportantDate so parent app can pick it up
-    if (announcement.date) {
-      try {
+    // If announcement has a date or showInCalendar flag, create a corresponding ImportantDate so parent app can pick it up
+    try {
+      const shouldCreateCalendar = Boolean(announcement.showInCalendar) || Boolean(announcement.date);
+      if (shouldCreateCalendar) {
+        const eventDate = announcement.date || announcement.publishDate || new Date();
         const important = await ImportantDate.create({
           title: announcement.title,
           description: announcement.content,
-          date: announcement.date,
+          date: eventDate,
+          endDate: announcement.expiryDate || undefined,
           type: announcement.type === 'holiday' ? 'holiday' : 'event',
           priority: announcement.priority || 'normal',
           schoolId: announcement.schoolId,
           classes: announcement.classes || [],
           applyToAllClasses: announcement.applyToAllClasses,
-          createdBy: announcement.createdBy
+          createdBy: announcement.createdBy,
+          sourceAnnouncement: announcement._id
         });
 
         // Emit via websocket if available
         if (global.io) {
           global.io.to(`school_${schoolId}`).emit('important_date_created', { type: 'important_date_created', importantDate: important, schoolId });
         }
-      } catch (innerErr) {
-        console.error('Failed to create corresponding ImportantDate for announcement:', innerErr);
       }
+    } catch (innerErr) {
+      console.error('Failed to create corresponding ImportantDate for announcement:', innerErr);
     }
 
     res.status(201).json({ success: true, message: 'Announcement created', data: announcement });
@@ -102,9 +106,42 @@ const updateAnnouncement = async (req, res) => {
   try {
     const announcement = await Announcement.findOne({ _id: req.params.id, schoolId: req.user.schoolId });
     if (!announcement) return res.status(404).json({ success: false, error: 'Announcement not found' });
-
     Object.assign(announcement, req.body, { updatedAt: new Date() });
     await announcement.save();
+
+    // Sync ImportantDate: find existing important date linked to this announcement
+    try {
+      const linked = await ImportantDate.findOne({ sourceAnnouncement: announcement._id });
+      const shouldHaveEvent = Boolean(announcement.showInCalendar) || Boolean(announcement.date);
+      if (shouldHaveEvent) {
+        const eventPayload = {
+          title: announcement.title,
+          description: announcement.content,
+          date: announcement.date || announcement.publishDate || new Date(),
+          endDate: announcement.expiryDate || undefined,
+          type: announcement.type === 'holiday' ? 'holiday' : 'event',
+          priority: announcement.priority || 'normal',
+          schoolId: announcement.schoolId,
+          classes: announcement.classes || [],
+          applyToAllClasses: announcement.applyToAllClasses,
+          createdBy: announcement.createdBy,
+          sourceAnnouncement: announcement._id
+        };
+
+        if (linked) {
+          Object.assign(linked, eventPayload);
+          await linked.save();
+        } else {
+          await ImportantDate.create(eventPayload);
+        }
+      } else if (linked) {
+        // No longer should appear in calendar -> deactivate
+        linked.isActive = false;
+        await linked.save();
+      }
+    } catch (syncErr) {
+      console.error('Failed to sync ImportantDate for announcement update:', syncErr);
+    }
 
     res.json({ success: true, message: 'Announcement updated', data: announcement });
   } catch (error) {
@@ -117,9 +154,19 @@ const deleteAnnouncement = async (req, res) => {
   try {
     const announcement = await Announcement.findOne({ _id: req.params.id, schoolId: req.user.schoolId });
     if (!announcement) return res.status(404).json({ success: false, error: 'Announcement not found' });
-
     announcement.isActive = false;
     await announcement.save();
+
+    // Soft-delete linked ImportantDate if any
+    try {
+      const linked = await ImportantDate.findOne({ sourceAnnouncement: announcement._id });
+      if (linked) {
+        linked.isActive = false;
+        await linked.save();
+      }
+    } catch (innerErr) {
+      console.error('Failed to soft-delete linked ImportantDate:', innerErr);
+    }
 
     res.json({ success: true, message: 'Announcement deleted' });
   } catch (error) {

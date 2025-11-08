@@ -8,7 +8,16 @@ const createItem = async (req, res) => {
 
     const schoolId = req.user.schoolId;
     const createdBy = req.user._id;
-    const data = { ...req.body, schoolId, createdBy };
+    // If request contains files (uploaded by multer/cloudinary), map them into images array
+    const images = (req.files && Array.isArray(req.files)) ? req.files.map(f => ({ url: f.path, uploadedAt: new Date() })) : [];
+
+    // merge body fields and attach images and meta
+    const bodyData = { ...req.body };
+    // If quantity or minQuantity were sent as strings (FormData), coerce to Number where applicable
+    if (bodyData.quantity) bodyData.quantity = Number(bodyData.quantity);
+    if (bodyData.minQuantity) bodyData.minQuantity = Number(bodyData.minQuantity);
+
+    const data = { ...bodyData, images, schoolId, createdBy };
 
     const item = await InventoryItem.create(data);
     res.status(201).json({ success: true, message: 'Inventory item created', data: item });
@@ -52,7 +61,18 @@ const updateItem = async (req, res) => {
     const item = await InventoryItem.findOne({ _id: req.params.id, schoolId: req.user.schoolId });
     if (!item) return res.status(404).json({ success: false, error: 'Item not found' });
 
-    Object.assign(item, req.body);
+    // If files were uploaded, append them to images
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      const newImages = req.files.map(f => ({ url: f.path, uploadedAt: new Date() }));
+      item.images = [...(item.images || []), ...newImages];
+    }
+
+    // Merge other fields from body (coerce numbers if needed)
+    const incoming = { ...req.body };
+    if (incoming.quantity) incoming.quantity = Number(incoming.quantity);
+    if (incoming.minQuantity) incoming.minQuantity = Number(incoming.minQuantity);
+
+    Object.assign(item, incoming);
     await item.save();
 
     res.json({ success: true, message: 'Inventory item updated', data: item });

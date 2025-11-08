@@ -47,6 +47,11 @@ const importantDateSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  // Link back to originating announcement (optional)
+  sourceAnnouncement: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Announcement'
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

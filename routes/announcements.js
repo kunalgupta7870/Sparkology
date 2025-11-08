@@ -6,7 +6,15 @@ const { protect } = require('../middleware/auth');
 router.use(protect);
 
 // POST /api/announcements
-router.post('/', createAnnouncement);
+router.post(
+	'/',
+	[
+		body('title').notEmpty().withMessage('Title is required'),
+		body('content').notEmpty().withMessage('Content is required'),
+		// Add more fields as per your Announcement schema
+	],
+	createAnnouncement
+);
 
 // GET /api/announcements
 router.get('/', getAnnouncements);
