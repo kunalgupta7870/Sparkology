@@ -255,13 +255,21 @@ const createUser = async (req, res) => {
 // @access  Private (Admin or Owner)
 const updateUser = async (req, res) => {
   try {
-    // Check for validation errors
+    // Check for validation errors (excluding password validation for updates)
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
+    const filteredErrors = errors.array().filter(err => {
+      // Skip password validation errors if password is not provided (optional for updates)
+      if (err.param === 'password' && !req.body.password) {
+        return false;
+      }
+      return true;
+    });
+    
+    if (filteredErrors.length > 0) {
       return res.status(400).json({
         success: false,
         error: 'Validation failed',
-        details: errors.array()
+        details: filteredErrors
       });
     }
 
@@ -273,7 +281,7 @@ const updateUser = async (req, res) => {
       });
     }
 
-    const { name, email, role, schoolId, isActive } = req.body;
+    const { name, email, role, schoolId, isActive, password } = req.body;
 
     // Check if email already exists (excluding current user)
     if (email && email.toLowerCase() !== user.email) {
@@ -300,12 +308,25 @@ const updateUser = async (req, res) => {
       }
     }
 
+    // Validate password if provided
+    if (password && password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password must be at least 6 characters long'
+      });
+    }
+
     // Update fields
     if (name) user.name = name;
     if (email) user.email = email.toLowerCase();
     if (role) user.role = role;
     if (schoolId !== undefined) user.schoolId = schoolId;
     if (isActive !== undefined) user.isActive = isActive;
+    
+    // Update password if provided (will be hashed by pre-save middleware)
+    if (password) {
+      user.password = password;
+    }
 
     await user.save();
 

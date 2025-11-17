@@ -12,7 +12,6 @@ const studentSchema = new mongoose.Schema({
   email: {
     type: String,
     required: [true, 'Student email is required'],
-    unique: true,
     lowercase: true,
     trim: true,
     match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
@@ -26,14 +25,12 @@ const studentSchema = new mongoose.Schema({
   rollNumber: {
     type: String,
     required: [true, 'Roll number is required'],
-    trim: true,
-    unique: true
+    trim: true
   },
   admissionNumber: {
     type: String,
     required: [true, 'Admission number is required'],
-    trim: true,
-    unique: true
+    trim: true
   },
   dateOfBirth: {
     type: Date,
@@ -187,9 +184,12 @@ const studentSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
-studentSchema.index({ email: 1 });
-studentSchema.index({ rollNumber: 1 });
-studentSchema.index({ admissionNumber: 1 });
+// Email and phone are globally unique (across all schools)
+studentSchema.index({ email: 1 }, { unique: true, sparse: true });
+studentSchema.index({ phone: 1 }, { unique: true, sparse: true });
+// Roll number and admission number are unique per school
+studentSchema.index({ rollNumber: 1, schoolId: 1 }, { unique: true });
+studentSchema.index({ admissionNumber: 1, schoolId: 1 }, { unique: true });
 studentSchema.index({ schoolId: 1 });
 studentSchema.index({ classId: 1 });
 studentSchema.index({ status: 1 });

@@ -360,13 +360,24 @@ const createTeacher = async (req, res) => {
     const { name, email, password, phone } = req.body;
     const schoolId = req.user.schoolId; // Get schoolId from authenticated user
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
-    if (existingUser) {
+    // Check if email already exists globally (across all schools)
+    const existingEmail = await User.findOne({ email: email.toLowerCase() });
+    if (existingEmail) {
       return res.status(400).json({
         success: false,
         error: 'A user with this email already exists. Please use a different email address.'
       });
+    }
+
+    // Check if phone already exists globally (if provided)
+    if (phone) {
+      const existingPhone = await User.findOne({ phone });
+      if (existingPhone) {
+        return res.status(400).json({
+          success: false,
+          error: 'A user with this phone number already exists. Please use a different phone number.'
+        });
+      }
     }
 
     // Create teacher
@@ -422,13 +433,24 @@ const createLibrarian = async (req, res) => {
     const { name, email, password, phone } = req.body;
     const schoolId = req.user.schoolId; // Get schoolId from authenticated user
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
-    if (existingUser) {
+    // Check if email already exists globally (across all schools)
+    const existingEmail = await User.findOne({ email: email.toLowerCase() });
+    if (existingEmail) {
       return res.status(400).json({
         success: false,
         error: 'A user with this email already exists. Please use a different email address.'
       });
+    }
+
+    // Check if phone already exists globally (if provided)
+    if (phone) {
+      const existingPhone = await User.findOne({ phone });
+      if (existingPhone) {
+        return res.status(400).json({
+          success: false,
+          error: 'A user with this phone number already exists. Please use a different phone number.'
+        });
+      }
     }
 
     // Create librarian
@@ -484,13 +506,24 @@ const createAccountant = async (req, res) => {
     const { name, email, password, phone } = req.body;
     const schoolId = req.user.schoolId; // Get schoolId from authenticated user
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
-    if (existingUser) {
+    // Check if email already exists globally (across all schools)
+    const existingEmail = await User.findOne({ email: email.toLowerCase() });
+    if (existingEmail) {
       return res.status(400).json({
         success: false,
         error: 'A user with this email already exists. Please use a different email address.'
       });
+    }
+
+    // Check if phone already exists globally (if provided)
+    if (phone) {
+      const existingPhone = await User.findOne({ phone });
+      if (existingPhone) {
+        return res.status(400).json({
+          success: false,
+          error: 'A user with this phone number already exists. Please use a different phone number.'
+        });
+      }
     }
 
     // Create accountant

@@ -12,11 +12,9 @@ const parentSchema = new mongoose.Schema({
   email: {
     type: String,
     required: [true, 'Parent email is required'],
-    unique: true,
     lowercase: true,
     trim: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email'],
-    index: true
+    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
   },
   password: {
     type: String,
@@ -162,6 +160,9 @@ const parentSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
+// Email and phone are globally unique (across all schools)
+parentSchema.index({ email: 1 }, { unique: true, sparse: true });
+parentSchema.index({ phone: 1 }, { unique: true, sparse: true });
 parentSchema.index({ studentIds: 1 });
 parentSchema.index({ studentId: 1 }); // Keep for backward compatibility
 parentSchema.index({ schoolId: 1 });

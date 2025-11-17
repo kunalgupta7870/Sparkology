@@ -171,10 +171,32 @@ const createStudent = async (req, res) => {
 
     const schoolId = req.user.schoolId;
 
-    // Check if student already exists
+    // Check if email already exists globally (across all schools)
+    const existingEmail = await Student.findOne({
+      email: email.toLowerCase()
+    });
+    if (existingEmail) {
+      return res.status(400).json({
+        success: false,
+        error: 'A student with this email already exists in the system'
+      });
+    }
+
+    // Check if phone already exists globally (if provided)
+    if (phone) {
+      const existingPhone = await Student.findOne({ phone });
+      if (existingPhone) {
+        return res.status(400).json({
+          success: false,
+          error: 'A student with this phone number already exists in the system'
+        });
+      }
+    }
+
+    // Check if roll number or admission number already exists within the same school
     const existingStudent = await Student.findOne({
+      schoolId: schoolId,
       $or: [
-        { email: email.toLowerCase() },
         { rollNumber },
         { admissionNumber }
       ]
@@ -183,7 +205,7 @@ const createStudent = async (req, res) => {
     if (existingStudent) {
       return res.status(400).json({
         success: false,
-        error: 'Student already exists with this email, roll number, or admission number'
+        error: 'A student with this roll number or admission number already exists in your school'
       });
     }
 
@@ -227,11 +249,19 @@ const createStudent = async (req, res) => {
     const createOrLinkParent = async (parentData) => {
       const { email, password, name, phone, parentType } = parentData;
       
-      // Check if parent already exists
-      const existingParent = await Parent.findOne({ 
-        email: email.toLowerCase(),
-        schoolId: schoolId
+      // Check if parent email already exists globally (across all schools)
+      const existingParentEmail = await Parent.findOne({ 
+        email: email.toLowerCase()
       });
+      
+      // Check if parent phone already exists globally (if provided)
+      let existingParentPhone = null;
+      if (phone) {
+        existingParentPhone = await Parent.findOne({ phone });
+      }
+
+      // If parent exists with same email or phone, link to existing parent
+      const existingParent = existingParentEmail || existingParentPhone;
       
       if (existingParent) {
         // Parent exists - add this student to their children list
@@ -256,6 +286,20 @@ const createStudent = async (req, res) => {
         return existingParent;
       } else {
         // Parent doesn't exist - create new parent record
+        // But first check if email or phone is already taken by another parent
+        if (email) {
+          const emailExists = await Parent.findOne({ email: email.toLowerCase() });
+          if (emailExists) {
+            throw new Error(`A parent with email ${email} already exists in the system`);
+          }
+        }
+        if (phone) {
+          const phoneExists = await Parent.findOne({ phone });
+          if (phoneExists) {
+            throw new Error(`A parent with phone number ${phone} already exists in the system`);
+          }
+        }
+        
         console.log(`📝 Creating new ${parentType} parent: ${email}`);
         const newParent = await Parent.create({
           name: name || parentType.charAt(0).toUpperCase() + parentType.slice(1),
@@ -385,6 +429,63 @@ const updateStudent = async (req, res) => {
       });
     }
 
+    const schoolId = req.user.schoolId;
+    const { email, rollNumber, admissionNumber, phone } = req.body;
+
+    // Check for uniqueness if email is being updated (globally unique)
+    if (email) {
+      const existingEmail = await Student.findOne({
+        email: email.toLowerCase(),
+        _id: { $ne: req.params.id } // Exclude current student
+      });
+      if (existingEmail) {
+        return res.status(400).json({
+          success: false,
+          error: 'Another student with this email already exists in the system'
+        });
+      }
+    }
+
+    // Check for uniqueness if phone is being updated (globally unique)
+    if (phone) {
+      const existingPhone = await Student.findOne({
+        phone: phone,
+        _id: { $ne: req.params.id } // Exclude current student
+      });
+      if (existingPhone) {
+        return res.status(400).json({
+          success: false,
+          error: 'Another student with this phone number already exists in the system'
+        });
+      }
+    }
+
+    // Check for uniqueness if rollNumber or admissionNumber is being updated (per school)
+    if (rollNumber || admissionNumber) {
+      const uniquenessQuery = {
+        schoolId: schoolId,
+        _id: { $ne: req.params.id }, // Exclude current student
+        $or: []
+      };
+
+      if (rollNumber) {
+        uniquenessQuery.$or.push({ rollNumber });
+      }
+      if (admissionNumber) {
+        uniquenessQuery.$or.push({ admissionNumber });
+      }
+
+      if (uniquenessQuery.$or.length > 0) {
+        const existingStudent = await Student.findOne(uniquenessQuery);
+        if (existingStudent) {
+          return res.status(400).json({
+            success: false,
+            error: 'Another student already exists with this roll number or admission number in your school'
+          });
+        }
+      }
+    }
+
     // Update student
     const updatedStudent = await Student.findByIdAndUpdate(
       req.params.id,
@@ -465,16 +566,50 @@ const studentLogin = async (req, res) => {
       });
     }
 
-    const { email, password } = req.body;
+    const { email, password, schoolCode } = req.body;
 
-    // Find student and include password
-    const student = await Student.findByEmail(email);
-    if (!student) {
+    // Build query to find student - if schoolCode provided, filter by school
+    let studentQuery = { email: email.toLowerCase() };
+    
+    // If schoolCode is provided, find the school first and filter by schoolId
+    if (schoolCode) {
+      const School = require('../models/School');
+      const school = await School.findOne({ code: schoolCode.toUpperCase() });
+      if (!school) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid school code'
+        });
+      }
+      studentQuery.schoolId = school._id;
+    }
+
+    // Find student(s) matching the email (and school if provided)
+    const students = await Student.find(studentQuery).select('+password');
+    
+    if (students.length === 0) {
       return res.status(401).json({
         success: false,
         error: 'Invalid credentials'
       });
     }
+
+    // If multiple students found and no schoolCode provided, ask for school identification
+    if (students.length > 1 && !schoolCode) {
+      // Get unique school codes for the matching students
+      const School = require('../models/School');
+      const schoolIds = [...new Set(students.map(s => s.schoolId.toString()))];
+      const schools = await School.find({ _id: { $in: schoolIds } }).select('name code');
+      
+      return res.status(400).json({
+        success: false,
+        error: 'Multiple accounts found with this email. Please provide your school code.',
+        schools: schools.map(s => ({ name: s.name, code: s.code }))
+      });
+    }
+
+    // Get the student (either the only one, or the one matching the schoolCode)
+    const student = students[0];
 
     // Check if student is locked
     if (student.isLocked) {
@@ -562,19 +697,50 @@ const parentLogin = async (req, res) => {
       });
     }
 
-    const { email, password } = req.body;
+    const { email, password, schoolCode } = req.body;
 
-    // Find parent record with separate _id
-    const parent = await Parent.findOne({
-      email: email.toLowerCase()
-    }).select('+password');
+    // Build query to find parent - if schoolCode provided, filter by school
+    let parentQuery = { email: email.toLowerCase() };
+    
+    // If schoolCode is provided, find the school first and filter by schoolId
+    if (schoolCode) {
+      const School = require('../models/School');
+      const school = await School.findOne({ code: schoolCode.toUpperCase() });
+      if (!school) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid school code'
+        });
+      }
+      parentQuery.schoolId = school._id;
+    }
 
-    if (!parent) {
+    // Find parent(s) matching the email (and school if provided)
+    const parents = await Parent.find(parentQuery).select('+password');
+
+    if (parents.length === 0) {
       return res.status(401).json({
         success: false,
         error: 'Invalid credentials'
       });
     }
+
+    // If multiple parents found and no schoolCode provided, ask for school identification
+    if (parents.length > 1 && !schoolCode) {
+      // Get unique school codes for the matching parents
+      const School = require('../models/School');
+      const schoolIds = [...new Set(parents.map(p => p.schoolId.toString()))];
+      const schools = await School.find({ _id: { $in: schoolIds } }).select('name code');
+      
+      return res.status(400).json({
+        success: false,
+        error: 'Multiple accounts found with this email. Please provide your school code.',
+        schools: schools.map(s => ({ name: s.name, code: s.code }))
+      });
+    }
+
+    // Get the parent (either the only one, or the one matching the schoolCode)
+    const parent = parents[0];
 
     // Check if parent account is locked
     if (parent.isLocked) {

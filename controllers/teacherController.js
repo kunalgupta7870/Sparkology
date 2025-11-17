@@ -106,13 +106,24 @@ const createTeacher = async (req, res) => {
     const { name, email, password, phone } = req.body;
     const schoolId = req.user.schoolId; // Get schoolId from authenticated user
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
-    if (existingUser) {
+    // Check if email already exists globally (across all schools)
+    const existingEmail = await User.findOne({ email: email.toLowerCase() });
+    if (existingEmail) {
       return res.status(400).json({
         success: false,
-        error: 'Teacher already exists with this email'
+        error: 'A user with this email already exists. Please use a different email address.'
       });
+    }
+
+    // Check if phone already exists globally (if provided)
+    if (phone) {
+      const existingPhone = await User.findOne({ phone });
+      if (existingPhone) {
+        return res.status(400).json({
+          success: false,
+          error: 'A user with this phone number already exists. Please use a different phone number.'
+        });
+      }
     }
 
     // Create teacher
@@ -178,6 +189,34 @@ const updateTeacher = async (req, res) => {
     }
 
     const { name, email, phone } = req.body;
+
+    // Check for uniqueness if email is being updated (globally unique)
+    if (email) {
+      const existingEmail = await User.findOne({
+        email: email.toLowerCase(),
+        _id: { $ne: req.params.id } // Exclude current teacher
+      });
+      if (existingEmail) {
+        return res.status(400).json({
+          success: false,
+          error: 'Another user with this email already exists in the system'
+        });
+      }
+    }
+
+    // Check for uniqueness if phone is being updated (globally unique)
+    if (phone) {
+      const existingPhone = await User.findOne({
+        phone: phone,
+        _id: { $ne: req.params.id } // Exclude current teacher
+      });
+      if (existingPhone) {
+        return res.status(400).json({
+          success: false,
+          error: 'Another user with this phone number already exists in the system'
+        });
+      }
+    }
 
     // Update fields
     if (name) teacher.name = name;
