@@ -11,14 +11,58 @@ const { validationResult } = require('express-validator');
 // @access  Private (School Admin, Teachers for their classes)
 const getStudents = async (req, res) => {
   try {
-    const { page = 1, limit = 1000, classId, status } = req.query;
-    const schoolId = req.user.schoolId;
+    const { page = 1, limit = 1000, classId, status, schoolId: querySchoolId } = req.query;
     const userRole = req.user.role;
+    
+    // For admin users, allow querying by schoolId parameter
+    // For school admins, use their assigned schoolId
+    let schoolId;
+    if (userRole === 'admin') {
+      if (querySchoolId) {
+        schoolId = querySchoolId;
+      } else {
+        // Admin must provide schoolId
+        return res.status(400).json({
+          success: false,
+          error: 'School ID is required for admin users'
+        });
+      }
+    } else {
+      schoolId = req.user.schoolId;
+      if (!schoolId) {
+        return res.status(400).json({
+          success: false,
+          error: 'School ID not found for user'
+        });
+      }
+    }
 
-    // Build query
-    const query = { schoolId };
-    if (classId) query.classId = classId;
+    // Build query - ensure schoolId is converted to ObjectId if it's a string
+    const mongoose = require('mongoose');
+    let finalSchoolId = schoolId;
+    // Convert string to ObjectId if it's a valid ObjectId string
+    if (typeof schoolId === 'string' && mongoose.Types.ObjectId.isValid(schoolId)) {
+      finalSchoolId = new mongoose.Types.ObjectId(schoolId);
+    }
+    
+    const query = { schoolId: finalSchoolId };
+    if (classId) {
+      let queryClassId = classId;
+      if (typeof classId === 'string' && mongoose.Types.ObjectId.isValid(classId)) {
+        queryClassId = new mongoose.Types.ObjectId(classId);
+      }
+      query.classId = queryClassId;
+    }
     if (status) query.status = status;
+    
+    console.log('🔍 Fetching students with query:', {
+      schoolId: query.schoolId.toString(),
+      classId: query.classId ? query.classId.toString() : undefined,
+      status: query.status
+    });
+    console.log('👤 User role:', userRole);
+    console.log('🏫 School ID (original):', schoolId);
+    console.log('🏫 School ID (converted):', finalSchoolId.toString());
 
     // For teachers, get students from all classes they teach
     if (userRole === 'teacher') {
@@ -52,13 +96,55 @@ const getStudents = async (req, res) => {
       .limit(limit * 1)
       .skip((page - 1) * limit);
 
+    console.log(`✅ Found ${students.length} students for school ${schoolId}`);
+    
     const total = await Student.countDocuments(query);
+    console.log(`📊 Total students count: ${total}`);
+
+    // For admin users, also fetch parent information for each student
+    let studentsWithParents = students;
+    if (userRole === 'admin') {
+      const Parent = require('../models/Parent');
+      studentsWithParents = await Promise.all(students.map(async (student) => {
+        const studentObj = student.toObject();
+        
+        // Fetch parent information linked to this student
+        const parents = await Parent.find({
+          $or: [
+            { studentIds: student._id },
+            { studentId: student._id }
+          ],
+          schoolId: student.schoolId
+        }).select('name email phone parentType');
+
+        // Organize parent info by type
+        const parentInfo = {};
+        parents.forEach(parent => {
+          if (parent.parentType === 'father') {
+            parentInfo.fatherName = parent.name;
+            parentInfo.fatherEmail = parent.email;
+            parentInfo.fatherPhone = parent.phone;
+          } else if (parent.parentType === 'mother') {
+            parentInfo.motherName = parent.name;
+            parentInfo.motherEmail = parent.email;
+            parentInfo.motherPhone = parent.phone;
+          } else if (parent.parentType === 'guardian') {
+            parentInfo.guardianName = parent.name;
+            parentInfo.guardianEmail = parent.email;
+            parentInfo.guardianPhone = parent.phone;
+          }
+        });
+        
+        studentObj.parentInfo = parentInfo;
+        return studentObj;
+      }));
+    }
 
     res.status(200).json({
       success: true,
       count: students.length,
       total,
-      data: students
+      data: studentsWithParents
     });
   } catch (error) {
     console.error('Get students error:', error);

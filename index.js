@@ -61,6 +61,7 @@ const meetingRoutes = require('./routes/meetings');
 const bookRoutes = require('./routes/books');
 const bookBorrowingRoutes = require('./routes/bookBorrowings');
 const coCurricularRoutes = require('./routes/coCurricular');
+const idCardRoutes = require('./routes/idCards');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -121,7 +122,7 @@ app.use(helmet({
 app.use(compression());
 
 // Serve static files (uploaded documents)
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static('/var/www/Sparkology/uploads'));
 
 // Rate limiting - DISABLED for file uploads
 // const limiter = rateLimit({
@@ -250,6 +251,7 @@ app.use('/api/subjects', subjectRoutes);
 app.use('/api/syllabus', syllabusRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/parents', parentRoutes);
+app.use('/api/id-cards', idCardRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/teacher-attendance', teacherAttendanceRoutes);

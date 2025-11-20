@@ -228,9 +228,8 @@ const deleteSubject = async (req, res) => {
       });
     }
 
-    // Soft delete by setting status to inactive
-    subject.status = 'inactive';
-    await subject.save();
+    // Delete subject from database
+    await Subject.findByIdAndDelete(req.params.id);
 
     res.status(200).json({
       success: true,

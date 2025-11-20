@@ -277,9 +277,8 @@ const deleteTeacher = async (req, res) => {
       });
     }
 
-    // Soft delete by setting isActive to false
-    teacher.isActive = false;
-    await teacher.save();
+    // Delete teacher from database
+    await User.findByIdAndDelete(req.params.id);
 
     res.status(200).json({
       success: true,

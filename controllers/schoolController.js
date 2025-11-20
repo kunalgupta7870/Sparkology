@@ -1,5 +1,8 @@
 const School = require('../models/School');
 const User = require('../models/User');
+const Student = require('../models/Student');
+const Class = require('../models/Class');
+const Parent = require('../models/Parent');
 const { validationResult } = require('express-validator');
 
 // @desc    Get all schools
@@ -248,20 +251,36 @@ const deleteSchool = async (req, res) => {
       });
     }
 
-    // Check if school has users
-    const schoolUsers = await User.find({ schoolId: req.params.id });
-    if (schoolUsers.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Cannot delete school with existing users. Please remove all users first.'
-      });
-    }
+    const schoolId = req.params.id;
 
-    await School.findByIdAndDelete(req.params.id);
+    // Delete all related data in cascade
+    // 1. Delete students first (they may have parent users)
+    const students = await Student.find({ schoolId });
+    const studentIds = students.map(s => s._id);
+    
+    // 2. Delete parent users associated with students
+    if (studentIds.length > 0) {
+      await User.deleteMany({ studentId: { $in: studentIds } });
+    }
+    
+    // 3. Delete students
+    await Student.deleteMany({ schoolId });
+    
+    // 4. Delete parents
+    await Parent.deleteMany({ schoolId });
+    
+    // 5. Delete all users associated with the school
+    await User.deleteMany({ schoolId });
+    
+    // 6. Delete classes
+    await Class.deleteMany({ schoolId });
+
+    // 7. Delete the school
+    await School.findByIdAndDelete(schoolId);
 
     res.status(200).json({
       success: true,
-      message: 'School deleted successfully'
+      message: 'School and all associated data deleted successfully'
     });
   } catch (error) {
     console.error('Delete school error:', error);
@@ -385,17 +404,19 @@ const getSchoolStats = async (req, res) => {
 
 // @desc    Get teachers for a school
 // @route   GET /api/schools/:id/teachers
-// @access  Private (School Admin only)
+// @access  Private (School Admin or Admin)
 const getSchoolTeachers = async (req, res) => {
   try {
     const schoolId = req.params.id;
     
-    // Check if the requesting user is a school admin for this school
-    if (req.user.role !== 'school_admin' || req.user.schoolId.toString() !== schoolId) {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied. You can only view teachers from your own school.'
-      });
+    // Allow admin role or school admin for their own school
+    if (req.user.role !== 'admin') {
+      if (req.user.role !== 'school_admin' || req.user.schoolId.toString() !== schoolId) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied. You can only view teachers from your own school.'
+        });
+      }
     }
 
     const teachers = await User.find({ 

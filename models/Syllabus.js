@@ -94,12 +94,64 @@ const syllabusSchema = new mongoose.Schema({
   },
   title: {
     type: String,
-    required: [true, 'Syllabus title is required'],
     trim: true
   },
   description: {
     type: String,
     trim: true
+  },
+  // Frontend fields
+  syllabusContent: {
+    type: String,
+    trim: true
+  },
+  topics: [{
+    topic: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    description: {
+      type: String,
+      trim: true
+    },
+    order: {
+      type: Number,
+      default: 0
+    }
+  }],
+  learningObjectives: [{
+    type: String,
+    trim: true
+  }],
+  assessmentCriteria: {
+    type: String,
+    trim: true
+  },
+  resources: [{
+    title: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    type: {
+      type: String,
+      enum: ['textbook', 'reference', 'website', 'video', 'other'],
+      default: 'other'
+    },
+    url: {
+      type: String,
+      trim: true
+    }
+  }],
+  category: {
+    type: String,
+    trim: true
+  },
+  contentType: {
+    type: String,
+    enum: ['upload_content', 'syllabus', 'assignment', 'lesson_plan'],
+    default: 'syllabus'
   },
   chapters: [chapterSchema],
   courseObjectives: [{

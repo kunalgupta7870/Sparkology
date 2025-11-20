@@ -8,6 +8,26 @@ const bookSchema = new mongoose.Schema({
     trim: true,
     maxlength: [200, 'Book name cannot exceed 200 characters']
   },
+  author: {
+    type: String,
+    trim: true,
+    maxlength: [200, 'Author name cannot exceed 200 characters']
+  },
+  isbn: {
+    type: String,
+    trim: true,
+    maxlength: [50, 'ISBN cannot exceed 50 characters']
+  },
+  category: {
+    type: String,
+    trim: true,
+    maxlength: [100, 'Category cannot exceed 100 characters']
+  },
+  location: {
+    type: String,
+    trim: true,
+    maxlength: [200, 'Location cannot exceed 200 characters']
+  },
   description: {
     type: String,
     trim: true,

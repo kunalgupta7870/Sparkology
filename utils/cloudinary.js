@@ -201,6 +201,25 @@ const uploadDocument = multer({
   }
 });
 
+// Multer upload middleware for syllabus files (PDF, images, videos)
+const uploadSyllabusFiles = multer({
+  storage: documentStorage,
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB limit per file (for videos)
+    files: 10 // Allow up to 10 files
+  },
+  fileFilter: (req, file, cb) => {
+    // Check file type - accept PDF, images, and videos
+    if (file.mimetype === 'application/pdf' || 
+        file.mimetype.startsWith('image/') ||
+        file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF, image, and video files are allowed'), false);
+    }
+  }
+});
+
 // Utility functions
 const uploadToCloudinary = {
   // Upload photo with custom options
@@ -428,6 +447,7 @@ const handleUploadError = (error, req, res, next) => {
 };
 
 module.exports = {
+  uploadSyllabusFiles,
   cloudinary,
   uploadPhoto,
   uploadProductImage,
