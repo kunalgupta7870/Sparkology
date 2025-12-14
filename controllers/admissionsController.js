@@ -3,13 +3,21 @@ const { validationResult } = require('express-validator');
 
 const submitApplication = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
-    }
-
     const schoolId = req.user.schoolId;
     const createdBy = req.user._id;
+    
+    // Validate required fields
+    const { studentName, dateOfBirth, gender, classApplied, academicYear, parentDetails, address } = req.body;
+    
+    if (!studentName) return res.status(400).json({ success: false, error: 'Student name is required' });
+    if (!dateOfBirth) return res.status(400).json({ success: false, error: 'Date of birth is required' });
+    if (!gender) return res.status(400).json({ success: false, error: 'Gender is required' });
+    if (!classApplied) return res.status(400).json({ success: false, error: 'Class is required' });
+    if (!academicYear) return res.status(400).json({ success: false, error: 'Academic year is required' });
+    if (!parentDetails || !parentDetails.name) return res.status(400).json({ success: false, error: 'Parent name is required' });
+    if (!parentDetails || !parentDetails.contact) return res.status(400).json({ success: false, error: 'Parent contact is required' });
+    if (!parentDetails || !parentDetails.email) return res.status(400).json({ success: false, error: 'Parent email is required' });
+
     const data = { ...req.body, schoolId, createdBy };
 
     const application = await AdmissionApplication.create(data);
@@ -17,7 +25,7 @@ const submitApplication = async (req, res) => {
     res.status(201).json({ success: true, message: 'Application submitted', data: application });
   } catch (error) {
     console.error('Submit application error:', error);
-    res.status(500).json({ success: false, error: 'Server error while submitting application' });
+    res.status(500).json({ success: false, error: error.message || 'Server error while submitting application' });
   }
 };
 

@@ -622,19 +622,91 @@ exports.getDueCollections = asyncHandler(async (req, res) => {
   const dueCollections = await FeeCollection.find(query)
     .populate({
       path: 'student',
-      select: 'name admissionNumber rollNumber classId email phone',
+      select: 'name admissionNumber rollNumber classId email phone parentPhone parentEmail',
       populate: {
         path: 'classId',
         select: 'name section'
       }
     })
-    .populate('feeStructure', 'name amount category')
+    .populate('feeStructure', 'name amount category frequency type')
     .sort({ dueDate: 1 });
+
+  // Group dues by student and calculate month periods
+  const now = new Date();
+  const studentDuesMap = new Map();
+
+  dueCollections.forEach(collection => {
+    const studentId = collection.student._id.toString();
+    const dueDate = new Date(collection.dueDate);
+    const monthsOverdue = Math.floor((now - dueDate) / (1000 * 60 * 60 * 24 * 30));
+    
+    if (!studentDuesMap.has(studentId)) {
+      studentDuesMap.set(studentId, {
+        studentId: studentId,
+        studentName: collection.student.name,
+        admissionNumber: collection.student.admissionNumber || collection.student.rollNumber || 'N/A',
+        className: collection.student.classId ? `${collection.student.classId.name}${collection.student.classId.section ? ' - ' + collection.student.classId.section : ''}` : 'N/A',
+        email: collection.student.email,
+        phone: collection.student.phone || collection.student.parentPhone,
+        oneMonthDue: 0,
+        twoMonthDue: 0,
+        threeMonthDue: 0,
+        otherChargesDue: 0,
+        totalDue: 0,
+        lastPaymentDate: collection.payments && collection.payments.length > 0 
+          ? collection.payments[collection.payments.length - 1].paymentDate 
+          : null,
+        paymentHistory: collection.payments ? collection.payments.map(p => ({
+          month: collection.month || 'N/A',
+          amount: p.amount,
+          date: p.paymentDate
+        })) : [],
+        collections: []
+      });
+    }
+
+    const studentDue = studentDuesMap.get(studentId);
+    const dueAmount = collection.dueAmount || 0;
+    
+    // Check if this is an "other charge" (not monthly fee structure)
+    const isOtherCharge = collection.feeStructure && 
+      (collection.feeStructure.type === 'custom' || 
+       collection.feeStructure.frequency === 'one-time' ||
+       !collection.month);
+
+    if (isOtherCharge) {
+      studentDue.otherChargesDue += dueAmount;
+    } else {
+      // Categorize by months overdue
+      if (monthsOverdue >= 3) {
+        studentDue.threeMonthDue += dueAmount;
+      } else if (monthsOverdue === 2) {
+        studentDue.twoMonthDue += dueAmount;
+      } else if (monthsOverdue === 1) {
+        studentDue.oneMonthDue += dueAmount;
+      } else {
+        // Less than 1 month, add to oneMonthDue for visibility
+        studentDue.oneMonthDue += dueAmount;
+      }
+    }
+
+    studentDue.totalDue += dueAmount;
+    studentDue.collections.push({
+      _id: collection._id,
+      month: collection.month,
+      dueAmount: dueAmount,
+      dueDate: collection.dueDate,
+      feeStructure: collection.feeStructure?.name
+    });
+  });
+
+  // Convert map to array
+  const studentDuesList = Array.from(studentDuesMap.values());
 
   res.status(200).json({
     success: true,
-    count: dueCollections.length,
-    data: dueCollections
+    count: studentDuesList.length,
+    data: studentDuesList
   });
 });
 

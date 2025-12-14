@@ -1,5 +1,4 @@
 const express = require('express');
-const { body } = require('express-validator');
 const router = express.Router();
 const { createAnnouncement, getAnnouncements, getAnnouncementById, updateAnnouncement, deleteAnnouncement } = require('../controllers/announcementController');
 const { protect } = require('../middleware/auth');
@@ -7,15 +6,7 @@ const { protect } = require('../middleware/auth');
 router.use(protect);
 
 // POST /api/announcements
-router.post(
-	'/',
-	[
-		body('title').notEmpty().withMessage('Title is required'),
-		body('content').notEmpty().withMessage('Content is required'),
-		// Add more fields as per your Announcement schema
-	],
-	createAnnouncement
-);
+router.post('/', createAnnouncement);
 
 // GET /api/announcements
 router.get('/', getAnnouncements);

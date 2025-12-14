@@ -6,6 +6,17 @@ const School = require('../models/School');
 const { generateToken } = require('../middleware/auth');
 const { validationResult } = require('express-validator');
 
+// Helper function to get file extension from MIME type
+const getFileExtension = (mimeType) => {
+  const mimeMap = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp'
+  };
+  return mimeMap[mimeType] || 'jpg';
+};
+
 // @desc    Get all students
 // @route   GET /api/students
 // @access  Private (School Admin, Teachers for their classes)
@@ -91,6 +102,7 @@ const getStudents = async (req, res) => {
 
     const students = await Student.find(query)
       .populate('classId', 'name section')
+      .populate('houseId', 'name color')
       .populate('schoolId', 'name code')
       .sort({ classId: 1, rollNumber: 1 }) // Sort by class first, then roll number
       .limit(limit * 1)
@@ -162,6 +174,7 @@ const getStudent = async (req, res) => {
   try {
     const student = await Student.findById(req.params.id)
       .populate('classId', 'name section teacherId')
+      .populate('houseId', 'name color')
       .populate('schoolId', 'name code address');
 
     if (!student) {
@@ -228,32 +241,115 @@ const getStudent = async (req, res) => {
 // @access  Private (School Admin)
 const createStudent = async (req, res) => {
   try {
-    // Check for validation errors
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        error: 'Validation failed',
-        details: errors.array()
+    console.log('📥 Received student enrollment request');
+    console.log('📋 Request body:', {
+      studentName: req.body.studentName,
+      email: req.body.email,
+      class: req.body.class,
+      dateOfBirth: req.body.dateOfBirth,
+      gender: req.body.gender,
+      hasParentData: !!(req.body.parentDetails?.email || req.body.parentDetails?.password)
+    });
+    // Debug: Check what files were received
+    console.log('📁 Files received:', {
+      hasFiles: !!req.files,
+      fileKeys: req.files ? Object.keys(req.files) : [],
+      avatarFile: req.files?.avatar ? `Present (${Array.isArray(req.files.avatar) ? req.files.avatar.length : 'not array'})` : 'Missing',
+      photoFile: req.files?.photo ? `Present (${Array.isArray(req.files.photo) ? req.files.photo.length : 'not array'})` : 'Missing',
+      documentsCount: req.files?.documents ? (Array.isArray(req.files.documents) ? req.files.documents.length : 0) : 0
+    });
+    
+    // Check for avatar in different possible formats (for logging only)
+    const avatarFileForLog = req.files?.avatar?.[0] || req.files?.avatar || req.files?.photo?.[0] || req.files?.photo;
+    if (avatarFileForLog) {
+      const fileToLog = Array.isArray(avatarFileForLog) ? avatarFileForLog[0] : avatarFileForLog;
+      console.log('📸 File found - details:', {
+        fieldname: fileToLog.fieldname,
+        originalname: fileToLog.originalname,
+        mimetype: fileToLog.mimetype,
+        size: fileToLog.size,
+        hasBuffer: !!fileToLog.buffer,
+        bufferLength: fileToLog.buffer?.length || 0
       });
+    } else {
+      console.log('❌ No avatar/photo file found in req.files');
+      if (req.files) {
+        console.log('Available file fields:', Object.keys(req.files));
+      }
     }
 
+    // Map new field names to old field names for backward compatibility
     const {
-      name,
+      studentName,
       email,
       password,
       rollNumber,
       admissionNumber,
       dateOfBirth,
       gender,
-      classId,
+      class: classFromPayload,
       address,
       phone,
       bloodGroup,
       medicalInfo,
+      medicalDetails,
       previousSchool,
-      pdfs
+      pdfs,
+      documents,
+      parentDetails,
+      parentRelation,
+      parentName,
+      parentPhone,
+      parentEmail,
+      parentPassword,
+      allergies,
+      medicalConditions,
+      emergencyContact,
+      emergencyContactPhone,
+      previousSchoolName,
+      previousSchoolBoard,
+      previousSchoolPercentage,
+      leavingReason,
+      admissionDate,
+      isDormitory,
+      roomNumber,
+      houseId
     } = req.body;
+    
+    // Handle dormitory fields - they are optional
+    // Convert string 'true'/'false' to boolean if needed
+    let finalIsDormitory = false;
+    if (isDormitory !== undefined && isDormitory !== null) {
+      if (typeof isDormitory === 'string') {
+        finalIsDormitory = isDormitory.toLowerCase() === 'true';
+      } else {
+        finalIsDormitory = Boolean(isDormitory);
+      }
+    }
+    
+    // Only set roomNumber if student is in dormitory
+    let finalRoomNumber = null;
+    if (finalIsDormitory && roomNumber) {
+      finalRoomNumber = roomNumber.trim() || null;
+    }
+
+    // Validate required fields
+    const errors = [];
+    if (!studentName || studentName.trim() === '') errors.push('Student name is required');
+    if (!email || email.trim() === '') errors.push('Email is required');
+    if (!password || password.length < 6) errors.push('Password must be at least 6 characters long');
+    if (!dateOfBirth) errors.push('Date of birth is required');
+    if (!gender) errors.push('Gender is required');
+    if (gender && !['male', 'female', 'other'].includes(gender)) errors.push('Gender must be male, female, or other');
+
+    if (errors.length > 0) {
+      console.log('❌ Validation errors:', errors);
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.map(msg => ({ msg }))
+      });
+    }
 
     const schoolId = req.user.schoolId;
 
@@ -279,25 +375,48 @@ const createStudent = async (req, res) => {
       }
     }
 
-    // Check if roll number or admission number already exists within the same school
-    const existingStudent = await Student.findOne({
+    // Generate or use provided admission number
+    let finalAdmissionNumber = admissionNumber;
+    if (!finalAdmissionNumber || finalAdmissionNumber.trim() === '') {
+      // Auto-generate admission number
+      const latestStudent = await Student.findOne({ schoolId }).sort({ _id: -1 });
+      const lastAdmissionNum = latestStudent?.admissionNumber || '0';
+      const numPart = parseInt(lastAdmissionNum.replace(/\D/g, '')) || 0;
+      finalAdmissionNumber = `ADM${String(numPart + 1).padStart(4, '0')}`;
+    }
+
+    // Check if roll number already exists within the same school (if provided)
+    if (rollNumber && rollNumber.trim() !== '') {
+      const existingRollNumber = await Student.findOne({
+        schoolId: schoolId,
+        rollNumber: rollNumber
+      });
+
+      if (existingRollNumber) {
+        return res.status(400).json({
+          success: false,
+          error: 'A student with this roll number already exists in your school'
+        });
+      }
+    }
+
+    // Check if admission number already exists within the same school
+    const existingAdmissionNumber = await Student.findOne({
       schoolId: schoolId,
-      $or: [
-        { rollNumber },
-        { admissionNumber }
-      ]
+      admissionNumber: finalAdmissionNumber
     });
 
-    if (existingStudent) {
+    if (existingAdmissionNumber) {
       return res.status(400).json({
         success: false,
-        error: 'A student with this roll number or admission number already exists in your school'
+        error: 'A student with this admission number already exists in your school'
       });
     }
 
-    // Verify class exists and belongs to the school
-    if (classId) {
-      const classExists = await Class.findOne({ _id: classId, schoolId });
+    // Verify class exists and belongs to the school (use either classId or class field)
+    const finalClassId = classFromPayload;
+    if (finalClassId) {
+      const classExists = await Class.findOne({ _id: finalClassId, schoolId });
       if (!classExists) {
         return res.status(400).json({
           success: false,
@@ -307,33 +426,252 @@ const createStudent = async (req, res) => {
     }
 
     // Create student
-    console.log('📝 Creating student with classId:', classId);
+    console.log('📝 Creating student with classId:', finalClassId);
+    
+    // Build medicalInfo from individual fields or medicalDetails object
+    let finalMedicalInfo = medicalInfo || medicalDetails || {};
+    if (!medicalInfo && !medicalDetails) {
+      // Build from individual fields if separate fields are provided
+      finalMedicalInfo = {};
+      if (bloodGroup) finalMedicalInfo.bloodGroup = bloodGroup;
+      if (allergies) finalMedicalInfo.allergies = Array.isArray(allergies) ? allergies : [allergies];
+      if (medicalConditions) finalMedicalInfo.conditions = Array.isArray(medicalConditions) ? medicalConditions : [medicalConditions];
+      if (emergencyContact) finalMedicalInfo.emergencyContact = emergencyContact;
+      if (emergencyContactPhone) finalMedicalInfo.emergencyContactPhone = emergencyContactPhone;
+    }
+    
+    // Verify house exists if provided
+    if (houseId) {
+      const House = require('../models/House');
+      const houseExists = await House.findOne({ _id: houseId, schoolId });
+      if (!houseExists) {
+        return res.status(400).json({
+          success: false,
+          error: 'House not found or does not belong to your school'
+        });
+      }
+    }
+
+    // Parse address - handle both string (from enrollment form) and object formats
+    let parsedAddress = {};
+    if (address) {
+      if (typeof address === 'string') {
+        // If address is a string (from textarea), store it in street field
+        parsedAddress = {
+          street: address.trim(),
+          city: '',
+          state: '',
+          zipCode: '',
+          country: 'India'
+        };
+        console.log('📍 Address parsed from string:', parsedAddress);
+      } else if (typeof address === 'object') {
+        // If address is already an object, use it as is
+        parsedAddress = {
+          street: address.street || '',
+          city: address.city || '',
+          state: address.state || '',
+          zipCode: address.zipCode || '',
+          country: address.country || 'India'
+        };
+        console.log('📍 Address parsed from object:', parsedAddress);
+      }
+    } else {
+      console.log('⚠️ No address provided');
+    }
+
+    // Process uploaded documents and save to local storage
+    let pdfUrls = pdfs || []; // Use existing pdfs if provided as URLs
+    
+    if (req.files?.documents && req.files.documents.length > 0) {
+      console.log(`📄 Processing ${req.files.documents.length} document(s) for upload`);
+      const fs = require('fs');
+      const path = require('path');
+      const uploadsDir = path.join(__dirname, '../uploads/documents');
+      
+      // Ensure uploads directory exists
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+        console.log('📁 Created uploads/documents directory');
+      }
+      
+      // Process each document file
+      const documentPromises = req.files.documents.map(async (docFile, index) => {
+        try {
+          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9) + '-' + index;
+          const ext = path.extname(docFile.originalname || '');
+          const baseName = path.basename(docFile.originalname || `document-${index}`, ext);
+          const sanitizedBaseName = baseName.replace(/[^a-zA-Z0-9.-]/g, '_');
+          const finalName = sanitizedBaseName + (ext || '.pdf');
+          const filename = `student-${uniqueSuffix}-${finalName}`;
+          const filepath = path.join(uploadsDir, filename);
+          
+          // Save file to disk
+          fs.writeFileSync(filepath, docFile.buffer);
+          const fileUrl = `/uploads/documents/${filename}`;
+          
+          console.log(`✅ Document ${index + 1} saved: ${filename} (${docFile.size} bytes)`);
+          return fileUrl;
+        } catch (error) {
+          console.error(`❌ Error saving document ${index + 1}:`, error);
+          return null;
+        }
+      });
+      
+      const savedDocUrls = await Promise.all(documentPromises);
+      // Filter out null values (failed uploads) and add to pdfUrls
+      const validDocUrls = savedDocUrls.filter(url => url !== null);
+      pdfUrls = [...pdfUrls, ...validDocUrls];
+      
+      console.log(`✅ Total PDFs/Documents to save: ${pdfUrls.length}`);
+    } else {
+      console.log('📄 No documents uploaded');
+    }
+
+    // Create student first to get the ID, then upload avatar
     const student = await Student.create({
-      name,
+      name: studentName,
       email: email.toLowerCase(),
       password,
-      rollNumber,
-      admissionNumber,
+      ...(rollNumber && { rollNumber }), // Only set if provided
+      admissionNumber: finalAdmissionNumber,
       dateOfBirth,
       gender,
-      classId: classId || null,
+      classId: finalClassId || null,
+      houseId: houseId || null,
+      isDormitory: finalIsDormitory,
+      roomNumber: finalRoomNumber,
       schoolId,
-      address: address || {},
+      address: parsedAddress,
       phone,
       bloodGroup,
-      medicalInfo: medicalInfo || {},
-      previousSchool,
-      pdfs: pdfs || []
+      avatar: null, // Will be updated after Cloudinary upload
+      medicalInfo: finalMedicalInfo,
+      previousSchool: previousSchool || {
+        name: previousSchoolName || '',
+        board: previousSchoolBoard || '',
+        percentage: previousSchoolPercentage || '',
+        leavingReason: leavingReason || ''
+      },
+      pdfs: pdfUrls, // Save all PDF URLs (from uploads and existing)
+      admissionDate: admissionDate || new Date()
     });
-    console.log('✅ Student created with ID:', student._id, 'classId:', student.classId);
+    
+    console.log(`✅ Student created with ${pdfUrls.length} PDF(s)/document(s)`);
+    console.log('✅ Student created with ID:', student._id, 'classId:', student.classId, 'houseId:', student.houseId, 'isDormitory:', student.isDormitory);
+
+    // Handle avatar upload to Cloudinary (after student creation to use actual student ID)
+    // Check both 'avatar' and 'photo' field names for compatibility
+    // Handle both array and direct file formats
+    let avatarFile = null;
+    
+    if (req.files?.avatar) {
+      avatarFile = Array.isArray(req.files.avatar) ? req.files.avatar[0] : req.files.avatar;
+    } else if (req.files?.photo) {
+      avatarFile = Array.isArray(req.files.photo) ? req.files.photo[0] : req.files.photo;
+    }
+    
+    console.log('🔍 Checking for avatar file:', {
+      hasAvatarField: !!req.files?.avatar,
+      hasPhotoField: !!req.files?.photo,
+      avatarFileFound: !!avatarFile,
+      avatarFileType: avatarFile ? typeof avatarFile : 'null'
+    });
+    
+    if (avatarFile && avatarFile.buffer) {
+      try {
+        console.log(`📸 Processing avatar upload - Size: ${avatarFile.size}, Type: ${avatarFile.mimetype}, Buffer size: ${avatarFile.buffer.length}`);
+        
+        if (!avatarFile.buffer || avatarFile.buffer.length === 0) {
+          throw new Error('Avatar file buffer is empty');
+        }
+        
+        // Import uploadStudentAvatar function - ensure it's available
+        const cloudinaryUtils = require('../utils/cloudinary');
+        const uploadStudentAvatar = cloudinaryUtils.uploadStudentAvatar || cloudinaryUtils.uploadToCloudinary?.uploadStudentAvatar;
+        
+        if (!uploadStudentAvatar) {
+          throw new Error('uploadStudentAvatar function not found in cloudinary utils');
+        }
+        
+        console.log('📤 Uploading avatar to Cloudinary (NOT to local storage)...');
+        const uploadResult = await uploadStudentAvatar(avatarFile.buffer, student._id.toString());
+        
+        if (!uploadResult || !uploadResult.secure_url) {
+          throw new Error('Cloudinary upload returned invalid result - no secure_url');
+        }
+        
+        console.log(`✅ Cloudinary upload successful:`, {
+          public_id: uploadResult.public_id,
+          secure_url: uploadResult.secure_url,
+          url: uploadResult.url
+        });
+        
+        // Update student with avatar URL from Cloudinary
+        student.avatar = uploadResult.secure_url;
+        const savedStudent = await student.save();
+        console.log(`✅ Avatar saved to student record. Student ID: ${savedStudent._id}, Avatar URL: ${savedStudent.avatar}`);
+        
+        // Verify it was saved
+        const verifyStudent = await Student.findById(student._id).select('avatar name');
+        if (verifyStudent.avatar) {
+          console.log(`✅ Verification - Student "${verifyStudent.name}" avatar in DB: ${verifyStudent.avatar}`);
+        } else {
+          console.error(`❌ Verification FAILED - Student "${verifyStudent.name}" avatar NOT found in DB`);
+        }
+      } catch (avatarError) {
+        console.error('❌ Avatar upload error:', avatarError);
+        console.error('Error details:', avatarError.message);
+        if (avatarError.stack) {
+          console.error('Stack trace:', avatarError.stack);
+        }
+        // Continue without avatar if upload fails
+        console.log('⚠️ Student created but avatar upload failed - student will be created without avatar');
+      }
+    } else {
+      console.log('⚠️ No avatar file found in request - student will be created without avatar');
+      if (req.files) {
+        console.log('Available file fields:', Object.keys(req.files));
+        Object.keys(req.files).forEach(key => {
+          const field = req.files[key];
+          if (Array.isArray(field)) {
+            console.log(`  Field '${key}': ${field.length} file(s)`);
+            field.forEach((file, idx) => {
+              console.log(`    [${idx}] ${file.originalname || 'unnamed'} - ${file.size} bytes - ${file.mimetype}`);
+            });
+          } else {
+            console.log(`  Field '${key}': ${field.originalname || 'unnamed'} - ${field.size} bytes - ${field.mimetype}`);
+          }
+        });
+      } else {
+        console.log('⚠️ req.files is null or undefined');
+      }
+    }
 
     // Create or update parent records if parent info is provided
     const createdParents = [];
-    const parentInfo = req.body.parentInfo;
+    
+    // Use the new parentDetails structure or fall back to old parentInfo
+    let finalParentDetails = parentDetails;
+    if (!finalParentDetails && parentName) {
+      // Build parent details from individual fields for backward compatibility
+      finalParentDetails = {
+        name: parentName,
+        relation: parentRelation || 'parent',
+        contact: parentPhone || phone,
+        email: parentEmail || email,
+        password: parentPassword || password
+      };
+    }
     
     // Helper function to create or link parent
     const createOrLinkParent = async (parentData) => {
-      const { email, password, name, phone, parentType } = parentData;
+      const { email, password, name, contact: phoneNum, relation } = parentData;
+      
+      // Validate parent data
+      if (!email || !password || !name) {
+        return null; // Skip invalid parent entries
+      }
       
       // Check if parent email already exists globally (across all schools)
       const existingParentEmail = await Parent.findOne({ 
@@ -342,8 +680,8 @@ const createStudent = async (req, res) => {
       
       // Check if parent phone already exists globally (if provided)
       let existingParentPhone = null;
-      if (phone) {
-        existingParentPhone = await Parent.findOne({ phone });
+      if (phoneNum) {
+        existingParentPhone = await Parent.findOne({ phone: phoneNum });
       }
 
       // If parent exists with same email or phone, link to existing parent
@@ -351,7 +689,7 @@ const createStudent = async (req, res) => {
       
       if (existingParent) {
         // Parent exists - add this student to their children list
-        console.log(`📝 Found existing ${parentType} parent: ${email}`);
+        console.log(`📝 Found existing parent: ${email}`);
         
         // Add student to studentIds array if not already there
         if (!existingParent.studentIds) {
@@ -368,7 +706,7 @@ const createStudent = async (req, res) => {
         }
         
         await existingParent.save();
-        console.log(`✅ Added student ${student._id} to existing ${parentType} parent, total children: ${existingParent.studentIds.length}`);
+        console.log(`✅ Added student ${student._id} to existing parent, total children: ${existingParent.studentIds.length}`);
         return existingParent;
       } else {
         // Parent doesn't exist - create new parent record
@@ -379,28 +717,71 @@ const createStudent = async (req, res) => {
             throw new Error(`A parent with email ${email} already exists in the system`);
           }
         }
-        if (phone) {
-          const phoneExists = await Parent.findOne({ phone });
+        if (phoneNum) {
+          const phoneExists = await Parent.findOne({ phone: phoneNum });
           if (phoneExists) {
-            throw new Error(`A parent with phone number ${phone} already exists in the system`);
+            throw new Error(`A parent with phone number ${phoneNum} already exists in the system`);
           }
         }
         
-        console.log(`📝 Creating new ${parentType} parent: ${email}`);
+        console.log(`📝 Creating new parent: ${email}`);
+        const parentTypeValue = relation === 'father' ? 'father' : relation === 'mother' ? 'mother' : 'guardian';
         const newParent = await Parent.create({
-          name: name || parentType.charAt(0).toUpperCase() + parentType.slice(1),
+          name: name || parentTypeValue.charAt(0).toUpperCase() + parentTypeValue.slice(1),
           email: email.toLowerCase(),
           password: password,
-          phone: phone || '',
-          parentType: parentType,
+          phone: phoneNum || '',
+          parentType: parentTypeValue,
           studentId: student._id,
           studentIds: [student._id],
           schoolId: schoolId
         });
-        console.log(`✅ Created new ${parentType} parent with student ${student._id}`);
+        const parentTypeStr = relation === 'father' ? 'father' : relation === 'mother' ? 'mother' : 'guardian';
+        console.log(`✅ Created new ${parentTypeStr} parent with student ${student._id}`);
+        
+        // Create User record for parent authentication
+        try {
+          const User = require('../models/User');
+          const userExists = await User.findOne({ email: email.toLowerCase() });
+          if (!userExists) {
+            await User.create({
+              email: email.toLowerCase(),
+              password: password,
+              role: 'parent',
+              schoolId: schoolId,
+              parentId: newParent._id
+            });
+            console.log(`✅ Created User account for parent ${email}`);
+          }
+        } catch (userError) {
+          console.warn(`⚠️ Could not create User account for parent:`, userError.message);
+        }
+        
         return newParent;
       }
     };
+    
+    // Process parent details
+    if (finalParentDetails && finalParentDetails.email && finalParentDetails.password) {
+      try {
+        const parentRecord = await createOrLinkParent({
+          email: finalParentDetails.email,
+          password: finalParentDetails.password,
+          name: finalParentDetails.name,
+          contact: finalParentDetails.contact,
+          relation: finalParentDetails.relation || 'guardian'
+        });
+        if (parentRecord) {
+          createdParents.push(parentRecord);
+        }
+      } catch (error) {
+        console.error('Error processing parent:', error.message);
+        // Continue even if parent creation fails
+      }
+    }
+    
+    // Also process old parentInfo structure if present for backward compatibility
+    const parentInfo = req.body.parentInfo;
     
     // Process father
     if (parentInfo?.fatherEmail && parentInfo?.fatherPassword) {
@@ -409,10 +790,12 @@ const createStudent = async (req, res) => {
           email: parentInfo.fatherEmail,
           password: parentInfo.fatherPassword,
           name: parentInfo.fatherName,
-          phone: parentInfo.fatherPhone,
-          parentType: 'father'
+          contact: parentInfo.fatherPhone,
+          relation: 'father'
         });
-        createdParents.push(fatherParent);
+        if (fatherParent) {
+          createdParents.push(fatherParent);
+        }
       } catch (error) {
         console.error('Error processing father parent:', error.message);
         // Continue with other parents even if one fails
@@ -426,10 +809,12 @@ const createStudent = async (req, res) => {
           email: parentInfo.motherEmail,
           password: parentInfo.motherPassword,
           name: parentInfo.motherName,
-          phone: parentInfo.motherPhone,
-          parentType: 'mother'
+          contact: parentInfo.motherPhone,
+          relation: 'mother'
         });
-        createdParents.push(motherParent);
+        if (motherParent) {
+          createdParents.push(motherParent);
+        }
       } catch (error) {
         console.error('Error processing mother parent:', error.message);
         // Continue with other parents even if one fails
@@ -443,10 +828,12 @@ const createStudent = async (req, res) => {
           email: parentInfo.guardianEmail,
           password: parentInfo.guardianPassword,
           name: parentInfo.guardianName,
-          phone: parentInfo.guardianPhone,
-          parentType: 'guardian'
+          contact: parentInfo.guardianPhone,
+          relation: 'guardian'
         });
-        createdParents.push(guardianParent);
+        if (guardianParent) {
+          createdParents.push(guardianParent);
+        }
       } catch (error) {
         console.error('Error processing guardian parent:', error.message);
         // Continue with other parents even if one fails
@@ -456,15 +843,56 @@ const createStudent = async (req, res) => {
     // Update school student count
     await School.findByIdAndUpdate(schoolId, { $inc: { students: 1 } });
 
-    // Populate the created student
-    await student.populate('classId', 'name section');
-    await student.populate('schoolId', 'name code');
+    // Reload student from database to get latest data including avatar
+    const finalStudentDoc = await Student.findById(student._id)
+      .populate('classId', 'name section')
+      .populate('houseId', 'name color')
+      .populate('schoolId', 'name code');
+    
+    // Convert to plain object and ensure avatar is included
+    const finalStudent = finalStudentDoc.toObject();
+    
+    // Ensure avatar is included - check both finalStudent and the original student object
+    if (!finalStudent.avatar) {
+      // Try to get avatar from the mongoose document
+      if (finalStudentDoc.avatar) {
+        finalStudent.avatar = finalStudentDoc.avatar;
+        console.log('✅ Avatar retrieved from mongoose document:', finalStudent.avatar);
+      } else if (student.avatar) {
+        finalStudent.avatar = student.avatar;
+        console.log('⚠️ Using avatar from in-memory student object:', finalStudent.avatar);
+      } else {
+        // Final check - query database directly
+        const avatarCheck = await Student.findById(student._id).select('avatar').lean();
+        if (avatarCheck && avatarCheck.avatar) {
+          finalStudent.avatar = avatarCheck.avatar;
+          console.log('✅ Avatar retrieved from direct database query:', finalStudent.avatar);
+        } else {
+          console.log('⚠️ No avatar found anywhere');
+        }
+      }
+    } else {
+      console.log('✅ Avatar already in finalStudent:', finalStudent.avatar);
+    }
+    
+    console.log('✅ Final student data before response:', {
+      id: finalStudent._id,
+      name: finalStudent.name,
+      hasAvatar: !!finalStudent.avatar,
+      avatar: finalStudent.avatar || 'null',
+      avatarLength: finalStudent.avatar ? finalStudent.avatar.length : 0,
+      pdfsCount: finalStudent.pdfs ? finalStudent.pdfs.length : 0,
+      pdfs: finalStudent.pdfs || []
+    });
+    
+    // finalStudent is already a plain object (from lean()), so use it directly
+    const studentResponse = finalStudent;
 
     res.status(201).json({
       success: true,
       message: 'Student created successfully with login credentials',
       data: {
-        student,
+        student: studentResponse,
         parentAccounts: createdParents.map(parent => ({
           id: parent._id,
           name: parent.name,
@@ -572,12 +1000,84 @@ const updateStudent = async (req, res) => {
       }
     }
 
+    // Handle avatar upload to Cloudinary first if new avatar provided
+    let updateData = { ...req.body };
+    
+    if (req.files?.avatar?.[0]) {
+      const avatarFile = req.files.avatar[0];
+      try {
+        // Import uploadStudentAvatar function - ensure it's available
+        const cloudinaryUtils = require('../utils/cloudinary');
+        const uploadStudentAvatar = cloudinaryUtils.uploadStudentAvatar || cloudinaryUtils.uploadToCloudinary?.uploadStudentAvatar;
+        
+        if (!uploadStudentAvatar) {
+          throw new Error('uploadStudentAvatar function not found in cloudinary utils');
+        }
+        
+        console.log('📤 Uploading avatar to Cloudinary (NOT to local storage)...');
+        const uploadResult = await uploadStudentAvatar(avatarFile.buffer, req.params.id);
+        
+        if (!uploadResult || !uploadResult.secure_url) {
+          throw new Error('Cloudinary upload returned invalid result - no secure_url');
+        }
+        
+        updateData.avatar = uploadResult.secure_url;
+        console.log(`✅ Avatar updated on Cloudinary: ${uploadResult.public_id}, URL: ${uploadResult.secure_url}`);
+      } catch (avatarError) {
+        console.error('❌ Avatar upload error:', avatarError);
+        console.error('Error details:', avatarError.message);
+        // Continue without updating avatar if upload fails
+      }
+    }
+
+    // Handle address - parse from JSON string if it's a string (from FormData)
+    if (typeof updateData.address === 'string') {
+      try {
+        updateData.address = JSON.parse(updateData.address);
+      } catch (e) {
+        // If parsing fails, keep as is or set to empty object
+        updateData.address = {};
+      }
+    }
+    
+    // Handle medicalInfo - parse from JSON string if it's a string (from FormData)
+    if (typeof updateData.medicalInfo === 'string') {
+      try {
+        updateData.medicalInfo = JSON.parse(updateData.medicalInfo);
+      } catch (e) {
+        // If parsing fails, keep as is
+      }
+    }
+    
+    // Verify house exists if being updated
+    if (updateData.houseId) {
+      const House = require('../models/House');
+      const houseExists = await House.findOne({ _id: updateData.houseId, schoolId });
+      if (!houseExists) {
+        return res.status(400).json({
+          success: false,
+          error: 'House not found or does not belong to your school'
+        });
+      }
+    }
+
+    // Handle dormitory room number - clear if isDormitory is false
+    if (updateData.isDormitory === false || updateData.isDormitory === 'false') {
+      updateData.roomNumber = null;
+      updateData.isDormitory = false;
+    } else if (updateData.isDormitory === true || updateData.isDormitory === 'true') {
+      updateData.isDormitory = true;
+    }
+
     // Update student
     const updatedStudent = await Student.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      updateData,
       { new: true, runValidators: true }
-    ).populate('classId', 'name section').populate('schoolId', 'name code');
+    )
+      .populate('classId', 'name section')
+      .populate('houseId', 'name color')
+      .populate('schoolId', 'name code');
 
     res.status(200).json({
       success: true,
@@ -724,6 +1224,11 @@ const studentLogin = async (req, res) => {
     // Update last login
     student.lastLogin = new Date();
     await student.save();
+
+    // Ensure student has role set for token generation
+    if (!student.role) {
+      student.role = 'student';
+    }
 
     // Generate token
     const token = generateToken(student);
@@ -1221,6 +1726,7 @@ const getStudentProfile = async (req, res) => {
           phone: student.phone,
           bloodGroup: student.bloodGroup,
           medicalInfo: student.medicalInfo,
+          avatar: student.avatar,
           status: student.status,
           lastLogin: student.lastLogin,
           createdAt: student.createdAt
@@ -1273,21 +1779,157 @@ const getStudentClasses = async (req, res) => {
 // @access  Private (Student)
 const getStudentSchedule = async (req, res) => {
   try {
-    const { date, week } = req.query;
-    const student = await Student.findById(req.user._id);
+    const { date, week, timetable } = req.query;
+    const student = await Student.findById(req.user._id).populate('classId', '_id name section');
     
-    if (!student || !student.classId) {
+    if (!student) {
       return res.status(404).json({
         success: false,
-        error: 'Student not found or not assigned to any class'
+        error: 'Student not found'
+      });
+    }
+    
+    if (!student.classId) {
+      console.log('📅 Student has no classId assigned');
+      return res.status(404).json({
+        success: false,
+        error: 'Student not assigned to any class'
       });
     }
 
     const Schedule = require('../models/Schedule');
+    
+    // If timetable=true, return weekly timetable grouped by dayOfWeek
+    if (timetable === 'true' || (!date && !week)) {
+      console.log('📅 Getting timetable for student:', {
+        studentId: student._id,
+        classId: student.classId,
+        classIdType: typeof student.classId,
+        classIdValue: student.classId?._id || student.classId,
+        schoolId: student.schoolId
+      });
+      
+      // Get classId - handle both object and string formats
+      const classId = student.classId?._id || student.classId?.id || student.classId;
+      if (!classId) {
+        return res.status(404).json({
+          success: false,
+          error: 'Student not assigned to any class'
+        });
+      }
+      
+      // Try to get schedules without academic year filter first, then with current academic year
+      // This ensures we get schedules regardless of academic year format
+      const currentYear = new Date().getFullYear();
+      const academicYears = [
+        `${currentYear}-${currentYear + 1}`,  // 2025-2026
+        `${currentYear - 1}-${currentYear}`,  // 2024-2025
+        `${currentYear + 1}-${currentYear + 2}`, // 2026-2027 (future)
+      ];
+      
+      console.log('📅 Trying academic years:', academicYears);
+      
+      let schedules = [];
+      let usedAcademicYear = null;
+      
+      // Try each academic year format
+      for (const academicYear of academicYears) {
+        const foundSchedules = await Schedule.getScheduleByClass(classId.toString(), academicYear);
+        if (foundSchedules.length > 0) {
+          schedules = foundSchedules;
+          usedAcademicYear = academicYear;
+          console.log('📅 Found schedules with academic year:', academicYear, 'Count:', schedules.length);
+          break;
+        }
+      }
+      
+      // If still no schedules, try without academic year filter
+      if (schedules.length === 0) {
+        console.log('📅 No schedules found with academic year filter, trying without filter...');
+        schedules = await Schedule.find({
+          classId: classId,
+          status: 'active'
+        })
+        .populate('teacherId', 'name email')
+        .populate('subjectId', 'name code')
+        .sort({ dayOfWeek: 1, startTime: 1 });
+        console.log('📅 Found schedules without academic year filter:', schedules.length);
+      }
+      
+      console.log('📅 Total schedules found:', schedules.length);
+      
+      if (schedules.length > 0) {
+        console.log('📅 Sample schedule:', {
+          dayOfWeek: schedules[0].dayOfWeek,
+          subjectId: schedules[0].subjectId,
+          startTime: schedules[0].startTime,
+          endTime: schedules[0].endTime,
+          academicYear: schedules[0].academicYear
+        });
+      } else {
+        // Check if there are any schedules for this class at all
+        const allSchedules = await Schedule.find({ classId: classId });
+        console.log('📅 Total schedules for class (any status):', allSchedules.length);
+        if (allSchedules.length > 0) {
+          console.log('📅 Sample schedule (any status):', {
+            status: allSchedules[0].status,
+            academicYear: allSchedules[0].academicYear,
+            dayOfWeek: allSchedules[0].dayOfWeek
+          });
+        }
+      }
+      
+      // Group schedules by dayOfWeek
+      const timetableByDay = {
+        Monday: [],
+        Tuesday: [],
+        Wednesday: [],
+        Thursday: [],
+        Friday: [],
+        Saturday: [],
+        Sunday: []
+      };
+      
+      schedules.forEach(schedule => {
+        if (schedule.dayOfWeek && timetableByDay[schedule.dayOfWeek]) {
+          timetableByDay[schedule.dayOfWeek].push(schedule);
+        }
+      });
+      
+      // Sort each day's schedules by startTime
+      Object.keys(timetableByDay).forEach(day => {
+        timetableByDay[day].sort((a, b) => {
+          const timeA = a.startTime.split(':').map(Number);
+          const timeB = b.startTime.split(':').map(Number);
+          return (timeA[0] * 60 + timeA[1]) - (timeB[0] * 60 + timeB[1]);
+        });
+      });
+      
+      const totalSchedules = Object.values(timetableByDay).reduce((sum, day) => sum + day.length, 0);
+      console.log('📅 Timetable grouped by day:', {
+        Monday: timetableByDay.Monday.length,
+        Tuesday: timetableByDay.Tuesday.length,
+        Wednesday: timetableByDay.Wednesday.length,
+        Thursday: timetableByDay.Thursday.length,
+        Friday: timetableByDay.Friday.length,
+        Saturday: timetableByDay.Saturday.length,
+        Sunday: timetableByDay.Sunday.length,
+        total: totalSchedules
+      });
+      
+      return res.status(200).json({
+        success: true,
+        data: timetableByDay,
+        academicYear: usedAcademicYear || 'N/A',
+        totalSchedules: totalSchedules
+      });
+    }
+    
+    // Otherwise, return date-based schedules (for backward compatibility)
     let query = { 
       classId: student.classId,
       schoolId: student.schoolId,
-      isActive: true
+      status: 'active'
     };
 
     if (date) {

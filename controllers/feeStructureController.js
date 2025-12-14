@@ -109,20 +109,33 @@ exports.createFeeStructure = asyncHandler(async (req, res) => {
     category,
     class: classId,
     amount,
+    components,
+    totalAmount,
     frequency,
     dueDay,
     lateFee,
     discount,
     status,
     academicYear,
-    description
+    description,
+    type
   } = req.body;
 
-  // Validate required fields
-  if (!name || !category || !amount || !academicYear) {
+  // Validate required fields - support both old and new format
+  const hasComponents = components && components.length > 0;
+  const hasOldFormat = amount && category;
+  
+  if (!name || !academicYear) {
     return res.status(400).json({
       success: false,
-      error: 'Please provide name, category, amount, and academic year'
+      error: 'Please provide name and academic year'
+    });
+  }
+
+  if (!hasComponents && !hasOldFormat) {
+    return res.status(400).json({
+      success: false,
+      error: 'Please provide either components or category and amount'
     });
   }
 
@@ -131,19 +144,23 @@ exports.createFeeStructure = asyncHandler(async (req, res) => {
 
   console.log('Creating fee structure:', {
     school,
-    category,
+    name,
+    hasComponents,
+    hasOldFormat,
     classId,
     userSchoolId: req.user.schoolId,
     userRole: req.user.role
   });
 
-  // Verify category exists
-  const feeCategory = await FeeCategory.findOne({ _id: category, school });
-  if (!feeCategory) {
-    return res.status(400).json({
-      success: false,
-      error: 'Fee category not found or does not belong to this school'
-    });
+  // Verify category exists if using old format
+  if (hasOldFormat && category) {
+    const feeCategory = await FeeCategory.findOne({ _id: category, school });
+    if (!feeCategory) {
+      return res.status(400).json({
+        success: false,
+        error: 'Fee category not found or does not belong to this school'
+      });
+    }
   }
 
   // Verify class exists if provided (skip if null or empty string)
@@ -172,15 +189,28 @@ exports.createFeeStructure = asyncHandler(async (req, res) => {
     });
   }
 
+  // Calculate total from components if provided
+  let finalAmount = amount || 0;
+  let finalTotalAmount = totalAmount || 0;
+  
+  if (hasComponents) {
+    const validComponents = components.filter(c => c.category && c.amount > 0);
+    finalTotalAmount = validComponents.reduce((sum, c) => sum + (c.amount || 0), 0);
+    finalAmount = finalTotalAmount;
+  }
+
   // Create fee structure
   const feeStructure = await FeeStructure.create({
     school,
     name: name.trim(),
-    category,
+    category: category || null,
     class: classId || null,
-    amount,
+    amount: finalAmount,
+    components: hasComponents ? components : [],
+    totalAmount: finalTotalAmount,
     frequency: frequency || 'monthly',
     dueDay: dueDay || 1,
+    type: type || 'monthly',
     lateFee: lateFee || { enabled: false, type: 'fixed', value: 0, gracePeriod: 0 },
     discount: discount || { enabled: false, type: 'percentage', value: 0 },
     status: status || 'active',
@@ -227,17 +257,20 @@ exports.updateFeeStructure = asyncHandler(async (req, res) => {
     category,
     class: classId,
     amount,
+    components,
+    totalAmount,
     frequency,
     dueDay,
     lateFee,
     discount,
     status,
     academicYear,
-    description
+    description,
+    type
   } = req.body;
 
   // Verify category exists if being updated
-  if (category && category !== feeStructure.category.toString()) {
+  if (category && category !== feeStructure.category?.toString()) {
     const feeCategory = await FeeCategory.findOne({ _id: category, school: feeStructure.school });
     if (!feeCategory) {
       return res.status(400).json({
@@ -285,6 +318,18 @@ exports.updateFeeStructure = asyncHandler(async (req, res) => {
 
   // Update fields
   if (amount !== undefined) feeStructure.amount = amount;
+  
+  // Handle components update
+  if (components && Array.isArray(components)) {
+    const validComponents = components.filter(c => c.category && c.amount > 0);
+    feeStructure.components = validComponents;
+    const calculatedTotal = validComponents.reduce((sum, c) => sum + (c.amount || 0), 0);
+    feeStructure.totalAmount = calculatedTotal;
+    feeStructure.amount = calculatedTotal; // Sync with amount field
+  } else if (totalAmount !== undefined) {
+    feeStructure.totalAmount = totalAmount;
+  }
+  
   if (frequency) feeStructure.frequency = frequency;
   if (dueDay !== undefined) feeStructure.dueDay = dueDay;
   if (lateFee) feeStructure.lateFee = lateFee;
@@ -292,6 +337,7 @@ exports.updateFeeStructure = asyncHandler(async (req, res) => {
   if (status) feeStructure.status = status;
   if (academicYear) feeStructure.academicYear = academicYear;
   if (description !== undefined) feeStructure.description = description;
+  if (type) feeStructure.type = type;
 
   await feeStructure.save();
 

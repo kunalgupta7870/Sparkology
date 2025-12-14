@@ -9,7 +9,7 @@ const getSubjects = async (req, res) => {
   try {
     const schoolId = req.user.schoolId;
     
-    const subjects = await Subject.find({ schoolId, status: 'active' })
+    const subjects = await Subject.find({ schoolId })
       .populate('teacherId', 'name email')
       .populate('classId', 'name section')
       .sort({ name: 1 });
@@ -77,23 +77,38 @@ const createSubject = async (req, res) => {
       });
     }
 
-    const { name, code, description, teacherId, classId, credits, type } = req.body;
+    const { name, code, teacherId, classId, type } = req.body;
     const schoolId = req.user.schoolId;
 
-    // Check if subject already exists with same name AND class
-    // Name can be the same across different classes, but not within the same class
-    if (classId) {
-      const existingSubjectInClass = await Subject.findOne({
+    // Allow same subject name with different teachers in the same class
+    // Check if exact same subject (name + teacher + class) already exists
+    if (classId && teacherId) {
+      const exactDuplicate = await Subject.findOne({
         name,
         classId,
-        schoolId,
-        status: 'active'
+        teacherId,
+        schoolId
       });
 
-      if (existingSubjectInClass) {
+      if (exactDuplicate) {
         return res.status(400).json({
           success: false,
-          error: 'Subject with this name already exists in this class'
+          error: 'This exact subject-teacher-class combination already exists'
+        });
+      }
+    } else if (classId && !teacherId) {
+      // If no teacher specified, check for same name + class without teacher
+      const exactDuplicate = await Subject.findOne({
+        name,
+        classId,
+        teacherId: null,
+        schoolId
+      });
+
+      if (exactDuplicate) {
+        return res.status(400).json({
+          success: false,
+          error: 'Subject with this name already exists in this class without a teacher'
         });
       }
     }
@@ -103,8 +118,7 @@ const createSubject = async (req, res) => {
       const existingCode = await Subject.findOne({
         code: code.toUpperCase(),
         classId,
-        schoolId,
-        status: 'active'
+        schoolId
       });
 
       if (existingCode) {
@@ -130,11 +144,9 @@ const createSubject = async (req, res) => {
     const subject = await Subject.create({
       name,
       code: code ? code.toUpperCase() : name.substring(0, 3).toUpperCase(),
-      description,
       teacherId: teacherId || null,
       schoolId,
       classId: classId || null,
-      credits: credits || 1,
       type: type || 'core',
       createdBy: req.user._id
     });
@@ -173,6 +185,7 @@ const updateSubject = async (req, res) => {
     }
 
     const schoolId = req.user.schoolId;
+    const { name, classId, teacherId } = req.body;
     
     const subject = await Subject.findOne({ 
       _id: req.params.id,
@@ -184,6 +197,39 @@ const updateSubject = async (req, res) => {
         success: false,
         error: 'Subject not found'
       });
+    }
+
+    // Check for conflicts when updating name/class/teacher
+    if (name && classId && teacherId) {
+      const exactDuplicate = await Subject.findOne({
+        name,
+        classId,
+        teacherId,
+        schoolId,
+        _id: { $ne: req.params.id } // Exclude current subject
+      });
+
+      if (exactDuplicate) {
+        return res.status(400).json({
+          success: false,
+          error: 'This exact subject-teacher-class combination already exists'
+        });
+      }
+    } else if (name && classId && !teacherId) {
+      const exactDuplicate = await Subject.findOne({
+        name,
+        classId,
+        teacherId: null,
+        schoolId,
+        _id: { $ne: req.params.id }
+      });
+
+      if (exactDuplicate) {
+        return res.status(400).json({
+          success: false,
+          error: 'Subject with this name already exists in this class without a teacher'
+        });
+      }
     }
 
     // Update subject
@@ -209,7 +255,7 @@ const updateSubject = async (req, res) => {
   }
 };
 
-// @desc    Delete subject
+// @desc    Delete subject (hard delete)
 // @route   DELETE /api/subjects/:id
 // @access  Private (School Admin)
 const deleteSubject = async (req, res) => {
@@ -228,7 +274,7 @@ const deleteSubject = async (req, res) => {
       });
     }
 
-    // Delete subject from database
+    // Hard delete - remove from database
     await Subject.findByIdAndDelete(req.params.id);
 
     res.status(200).json({

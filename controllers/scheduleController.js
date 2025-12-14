@@ -235,7 +235,12 @@ const createSchedule = async (req, res) => {
     const [teacher, classData, subject] = await Promise.all([
       User.findOne({ _id: teacherId, schoolId, role: 'teacher' }),
       Class.findOne({ _id: classId, schoolId }),
-      Subject.findOne({ _id: subjectId, schoolId })
+      Subject.findOne({ 
+        _id: subjectId, 
+        schoolId,
+        teacherId: teacherId,
+        classId: classId
+      })
     ]);
 
     if (!teacher) {
@@ -255,15 +260,7 @@ const createSchedule = async (req, res) => {
     if (!subject) {
       return res.status(400).json({
         success: false,
-        error: 'Subject not found or does not belong to this school'
-      });
-    }
-
-    // Validate that the subject is taught by this teacher to this class
-    if (subject.teacherId.toString() !== teacherId || subject.classId.toString() !== classId) {
-      return res.status(400).json({
-        success: false,
-        error: 'This teacher does not teach this subject to this class'
+        error: 'This teacher does not teach this subject to this class. Please assign the subject to the teacher and class first.'
       });
     }
 
@@ -349,6 +346,28 @@ const updateSchedule = async (req, res) => {
       semester,
       notes
     } = req.body;
+
+    // If teacher, class, or subject is being updated, validate the new combination
+    if (teacherId || classId || subjectId) {
+      const finalTeacherId = teacherId || schedule.teacherId;
+      const finalClassId = classId || schedule.classId;
+      const finalSubjectId = subjectId || schedule.subjectId;
+
+      // Validate that the subject is taught by this teacher to this class
+      const subject = await Subject.findOne({
+        _id: finalSubjectId,
+        schoolId,
+        teacherId: finalTeacherId,
+        classId: finalClassId
+      });
+
+      if (!subject) {
+        return res.status(400).json({
+          success: false,
+          error: 'This teacher does not teach this subject to this class. Please assign the subject to the teacher and class first.'
+        });
+      }
+    }
 
     // Update schedule fields
     if (teacherId) schedule.teacherId = teacherId;

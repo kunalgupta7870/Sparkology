@@ -5,29 +5,30 @@ const { validationResult } = require('express-validator');
 // Create announcement
 const createAnnouncement = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
-    }
-
     const schoolId = req.user.schoolId;
     const createdBy = req.user._id;
 
-    const { title, content, date, type = 'general', priority = 'normal', classes = [], applyToAllClasses = true, attachments = [] } = req.body;
+    const { title, content, date, type = 'general', priority = 'normal', category = 'other', classes = [], applyToAllClasses = true, attachments = [] } = req.body;
+
+    // Validate required fields
+    if (!title) return res.status(400).json({ success: false, error: 'Title is required' });
+    if (!content) return res.status(400).json({ success: false, error: 'Content is required' });
+    if (!category) return res.status(400).json({ success: false, error: 'Category is required' });
 
     const announcement = await Announcement.create({
       title,
       content,
-      // keep backward compatible: announcements stored with publishDate; also accept explicit date
       date: date ? new Date(date) : undefined,
       type,
       priority,
+      category,
       schoolId,
       classes: applyToAllClasses ? [] : classes,
       applyToAllClasses,
       attachments,
       createdBy
     });
+    
     // If announcement has a date or showInCalendar flag, create a corresponding ImportantDate so parent app can pick it up
     try {
       const shouldCreateCalendar = Boolean(announcement.showInCalendar) || Boolean(announcement.date);
@@ -59,7 +60,7 @@ const createAnnouncement = async (req, res) => {
     res.status(201).json({ success: true, message: 'Announcement created', data: announcement });
   } catch (error) {
     console.error('Create announcement error:', error);
-    res.status(500).json({ success: false, error: 'Server error while creating announcement' });
+    res.status(500).json({ success: false, error: error.message || 'Server error while creating announcement' });
   }
 };
 

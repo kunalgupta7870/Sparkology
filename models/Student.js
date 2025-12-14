@@ -24,8 +24,8 @@ const studentSchema = new mongoose.Schema({
   },
   rollNumber: {
     type: String,
-    required: [true, 'Roll number is required'],
     trim: true
+    // No default - leave undefined if not provided (sparse index will ignore)
   },
   admissionNumber: {
     type: String,
@@ -55,6 +55,20 @@ const studentSchema = new mongoose.Schema({
   classId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Class',
+    default: null
+  },
+  houseId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'House',
+    default: null
+  },
+  isDormitory: {
+    type: Boolean,
+    default: false
+  },
+  roomNumber: {
+    type: String,
+    trim: true,
     default: null
   },
   schoolId: {
@@ -122,13 +136,12 @@ const studentSchema = new mongoose.Schema({
     default: null
   },
   medicalInfo: {
+    bloodGroup: String,
     allergies: [String],
+    conditions: [String],
     medications: [String],
-    emergencyContact: {
-      name: String,
-      phone: String,
-      relationship: String
-    }
+    emergencyContact: String,
+    emergencyContactPhone: String
   },
   
   // Academic Records
@@ -137,8 +150,10 @@ const studentSchema = new mongoose.Schema({
     default: new Date().getFullYear().toString()
   },
   previousSchool: {
-    type: String,
-    trim: true
+    name: String,
+    board: String,
+    percentage: String,
+    leavingReason: String
   },
   transferCertificate: {
     type: String,
@@ -187,8 +202,12 @@ const studentSchema = new mongoose.Schema({
 // Email and phone are globally unique (across all schools)
 studentSchema.index({ email: 1 }, { unique: true, sparse: true });
 studentSchema.index({ phone: 1 }, { unique: true, sparse: true });
-// Roll number and admission number are unique per school
-studentSchema.index({ rollNumber: 1, schoolId: 1 }, { unique: true });
+// Roll number is unique per school only when present (partial index)
+// This allows multiple students without rollNumber in same school
+studentSchema.index(
+  { rollNumber: 1, schoolId: 1 },
+  { unique: true, partialFilterExpression: { rollNumber: { $exists: true } } }
+);
 studentSchema.index({ admissionNumber: 1, schoolId: 1 }, { unique: true });
 studentSchema.index({ schoolId: 1 });
 studentSchema.index({ classId: 1 });

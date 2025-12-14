@@ -49,6 +49,19 @@ const inventoryImageStorage = new CloudinaryStorage({
   },
 });
 
+// Configure multer storage for student avatars
+const studentAvatarStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'school-portal/students/avatars',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    resource_type: 'image',
+    transformation: [
+      { width: 400, height: 400, crop: 'fill', gravity: 'face', quality: 'auto' }
+    ]
+  },
+});
+
 // Configure multer for co-curricular post image uploads
 const coCurricularImageStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
@@ -300,6 +313,34 @@ const uploadToCloudinary = {
     }
   },
 
+  // Upload student avatar from buffer
+  uploadStudentAvatar: async (buffer, studentId, options = {}) => {
+    try {
+      return new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder: 'school-portal/students/avatars',
+            public_id: `student-${studentId}-${Date.now()}`,
+            resource_type: 'image',
+            transformation: [
+              { width: 400, height: 400, crop: 'fill', gravity: 'face', quality: 'auto' }
+            ],
+            allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+            timeout: 60000,
+            ...options
+          },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
+        uploadStream.end(buffer);
+      });
+    } catch (error) {
+      throw new Error(`Student avatar upload failed: ${error.message}`);
+    }
+  },
+
   // Delete resource from Cloudinary
   deleteResource: async (publicId, resourceType = 'image') => {
     try {
@@ -448,6 +489,7 @@ const handleUploadError = (error, req, res, next) => {
 
 module.exports = {
   uploadSyllabusFiles,
+  studentAvatarStorage,
   cloudinary,
   uploadPhoto,
   uploadProductImage,
@@ -456,5 +498,7 @@ module.exports = {
   uploadCoCurricularImages,
   uploadToCloudinary,
   uploadInventoryImages,
-  handleUploadError
+  handleUploadError,
+  // Export uploadStudentAvatar directly for easier access
+  uploadStudentAvatar: uploadToCloudinary.uploadStudentAvatar
 };

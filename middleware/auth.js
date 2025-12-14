@@ -73,6 +73,12 @@ const protect = async (req, res, next) => {
       
       if (!user) {
         console.log('   ❌ User not found in database');
+        console.log('   🔍 Token details:', {
+          id: decoded.id,
+          role: decoded.role,
+          email: decoded.email,
+          searchedIn: decoded.role === 'student' ? 'Student model' : decoded.role === 'parent' ? 'Parent model' : 'User model'
+        });
         return res.status(401).json({
           success: false,
           error: 'Token is valid but user no longer exists.'
@@ -273,16 +279,35 @@ const optionalAuth = async (req, res, next) => {
 const generateToken = (user) => {
   // Determine role based on model type or explicit role
   let role = user.role;
+  
   if (!role) {
+    // Check model type by constructor name or model name
+    const modelName = user.constructor?.modelName || user.modelName || '';
+    
     // If no role field, determine based on model type
-    if (user.parentType) {
-      role = 'parent';
-    } else if (user.rollNumber) {
+    if (modelName === 'Student') {
       role = 'student';
+    } else if (modelName === 'Parent') {
+      role = 'parent';
+    } else if (user.rollNumber !== undefined) {
+      // Fallback: if rollNumber exists, it's a student
+      role = 'student';
+    } else if (user.parentType) {
+      // Fallback: if parentType exists, it's a parent
+      role = 'parent';
     } else {
-      role = 'user'; // Default fallback
+      role = 'user'; // Default fallback for User model
     }
   }
+  
+  console.log('🔐 generateToken: Setting role:', {
+    userId: user._id,
+    email: user.email,
+    modelName: user.constructor?.modelName || user.modelName,
+    hasRollNumber: user.rollNumber !== undefined,
+    explicitRole: user.role,
+    finalRole: role
+  });
   
   return jwt.sign({ 
     id: user._id,

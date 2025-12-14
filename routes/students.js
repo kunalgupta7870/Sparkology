@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
 const { protect, authorize } = require('../middleware/auth');
 const {
   getStudents,
@@ -32,6 +33,33 @@ const {
 const { uploadDocument, handleUploadError } = require('../utils/cloudinary');
 
 const router = express.Router();
+
+// Configure multer for file uploads (memory storage for temporary files)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit
+    files: 12 // Max 12 files (1 avatar + 1 photo + 10 documents) - allow both field names
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow both images (for avatar/photo) and PDFs (for documents)
+    const allowedImageMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    const allowedDocMimes = ['application/pdf'];
+    
+    if (file.fieldname === 'avatar' || file.fieldname === 'photo') {
+      if (allowedImageMimes.includes(file.mimetype.toLowerCase())) {
+        cb(null, true);
+      } else {
+        cb(new Error(`Avatar/Photo must be an image (JPEG, PNG, GIF, or WebP). Received: ${file.mimetype}`));
+      }
+    } else if (file.fieldname === 'documents') {
+      cb(null, true); // Accept any file type for documents
+    } else {
+      // Allow other fields to pass through
+      cb(null, true);
+    }
+  }
+});
 
 // Public routes (no authentication required)
 router.post('/login', loginValidation, studentLogin);
@@ -150,10 +178,14 @@ router.post('/upload-pdfs', authorize('school_admin'), uploadDocument.array('pdf
   }
 });
 
-router.post('/', authorize('school_admin'), studentValidation, createStudent);
+router.post('/', authorize('school_admin'), upload.fields([
+  { name: 'avatar', maxCount: 1 }, 
+  { name: 'photo', maxCount: 1 },  // Support both 'avatar' and 'photo' field names
+  { name: 'documents', maxCount: 10 }
+]), createStudent);
 router.get('/:id', authorize('school_admin', 'teacher', 'parent'), getStudent);
 router.get('/:id/performance', authorize('school_admin', 'teacher', 'parent'), getStudentPerformance);
-router.put('/:id', authorize('school_admin'), studentUpdateValidation, updateStudent);
+router.put('/:id', authorize('school_admin'), upload.fields([{ name: 'avatar', maxCount: 1 }]), studentUpdateValidation, updateStudent);
 router.put('/:id/assign-class', authorize('school_admin'), assignStudentToClass);
 router.put('/:id/remove-class', authorize('school_admin'), removeStudentFromClass);
 router.delete('/:id', authorize('school_admin'), deleteStudent);

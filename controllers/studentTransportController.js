@@ -224,10 +224,39 @@ exports.addAttendance = asyncHandler(async (req, res) => {
 exports.bulkAssignStudents = asyncHandler(async (req, res) => {
   const { students, routeId, vehicleId, pickupPoint, pickupTime, schoolId } = req.body;
   
+  // Validate required fields
   if (!students || !Array.isArray(students) || students.length === 0) {
     return res.status(400).json({
       success: false,
       message: 'Students array is required'
+    });
+  }
+  
+  if (!routeId) {
+    return res.status(400).json({
+      success: false,
+      message: 'Route ID is required'
+    });
+  }
+  
+  if (!pickupPoint || !pickupPoint.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Pickup point is required'
+    });
+  }
+  
+  if (!pickupTime || !pickupTime.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Pickup time is required'
+    });
+  }
+  
+  if (!schoolId) {
+    return res.status(400).json({
+      success: false,
+      message: 'School ID is required'
     });
   }
   
@@ -236,6 +265,16 @@ exports.bulkAssignStudents = asyncHandler(async (req, res) => {
   
   for (const studentId of students) {
     try {
+      // Verify student exists and belongs to the school
+      const student = await Student.findOne({ _id: studentId, schoolId });
+      if (!student) {
+        errors.push({
+          studentId,
+          message: 'Student not found or does not belong to this school'
+        });
+        continue;
+      }
+      
       // Check if student already has active transport
       const existingTransport = await StudentTransport.findOne({
         studentId,
@@ -253,9 +292,9 @@ exports.bulkAssignStudents = asyncHandler(async (req, res) => {
       const transport = await StudentTransport.create({
         studentId,
         routeId,
-        vehicleId,
-        pickupPoint,
-        pickupTime,
+        vehicleId: vehicleId || null,
+        pickupPoint: pickupPoint.trim(),
+        pickupTime: pickupTime.trim(),
         schoolId,
         status: 'active'
       });
@@ -264,7 +303,7 @@ exports.bulkAssignStudents = asyncHandler(async (req, res) => {
     } catch (error) {
       errors.push({
         studentId,
-        message: error.message
+        message: error.message || 'Failed to assign transport'
       });
     }
   }

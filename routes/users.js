@@ -2,7 +2,7 @@ const express = require('express');
 const { body } = require('express-validator');
 const User = require('../models/User');
 const School = require('../models/School');
-const { protect, isAdmin, isOwnerOrAdmin } = require('../middleware/auth');
+const { protect, isAdmin, isOwnerOrAdmin, authorize } = require('../middleware/auth');
 const { validationResult } = require('express-validator');
 
 const router = express.Router();
@@ -92,7 +92,7 @@ const getSchoolAdmins = async (req, res) => {
 
 // @desc    Get all users
 // @route   GET /api/users
-// @access  Private (Admin only)
+// @access  Private (Admin or School Admin)
 const getUsers = async (req, res) => {
   try {
     const { role, schoolId, search, page = 1, limit = 10 } = req.query;
@@ -100,12 +100,31 @@ const getUsers = async (req, res) => {
     // Build query
     let query = {};
     
-    if (role) {
-      query.role = role;
+    // If user is school_admin, restrict to their school only
+    if (req.user.role === 'school_admin') {
+      if (!req.user.schoolId) {
+        return res.status(400).json({
+          success: false,
+          error: 'School admin has no school assigned'
+        });
+      }
+      // Always restrict school_admin to their own school
+      query.schoolId = req.user.schoolId;
+      
+      // If schoolId is provided in query, verify it matches their school
+      if (schoolId && schoolId !== req.user.schoolId.toString() && schoolId !== req.user.schoolId._id?.toString()) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied. You can only view users from your school.'
+        });
+      }
+    } else if (req.user.role === 'admin' && schoolId) {
+      // Admin can query any school
+      query.schoolId = schoolId;
     }
     
-    if (schoolId) {
-      query.schoolId = schoolId;
+    if (role) {
+      query.role = role;
     }
     
     if (search) {
@@ -571,7 +590,7 @@ const verifyUser = async (req, res) => {
 };
 
 // Routes
-router.get('/', protect, isAdmin, getUsers);
+router.get('/', protect, authorize('admin', 'school_admin'), getUsers);
 router.get('/school-admins', protect, isAdmin, getSchoolAdmins);
 router.get('/stats', protect, isAdmin, getUserStats);
 router.get('/verify', protect, verifyUser);

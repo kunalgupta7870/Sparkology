@@ -12,20 +12,40 @@ const feeStructureSchema = new mongoose.Schema({
     trim: true,
     maxlength: [100, 'Fee name cannot exceed 100 characters']
   },
+  // Support both old single-category format and new components array format
   category: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'FeeCategory',
-    required: [true, 'Fee category is required']
+    default: null
   },
   class: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Class',
     default: null // null means applies to all classes
   },
+  // Single amount for backward compatibility
   amount: {
     type: Number,
-    required: [true, 'Fee amount is required'],
+    default: 0,
     min: [0, 'Amount cannot be negative']
+  },
+  // New: Array of fee components
+  components: [{
+    category: {
+      type: String,
+      trim: true
+    },
+    amount: {
+      type: Number,
+      default: 0,
+      min: [0, 'Component amount cannot be negative']
+    }
+  }],
+  // Total amount (calculated from components if provided)
+  totalAmount: {
+    type: Number,
+    default: 0,
+    min: [0, 'Total amount cannot be negative']
   },
   frequency: {
     type: String,
@@ -94,6 +114,11 @@ const feeStructureSchema = new mongoose.Schema({
     type: String,
     trim: true,
     maxlength: [500, 'Description cannot exceed 500 characters']
+  },
+  type: {
+    type: String,
+    enum: ['monthly', 'annual', 'semester', 'custom'],
+    default: 'monthly'
   },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,

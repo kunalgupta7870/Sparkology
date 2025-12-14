@@ -14,11 +14,6 @@ const subjectSchema = new mongoose.Schema({
     maxlength: [20, 'Subject code cannot exceed 20 characters'],
     uppercase: true
   },
-  description: {
-    type: String,
-    trim: true,
-    maxlength: [500, 'Description cannot exceed 500 characters']
-  },
   teacherId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -33,12 +28,6 @@ const subjectSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Class',
     default: null
-  },
-  credits: {
-    type: Number,
-    default: 1,
-    min: [1, 'Credits must be at least 1'],
-    max: [10, 'Credits cannot exceed 10']
   },
   type: {
     type: String,
@@ -65,19 +54,20 @@ const subjectSchema = new mongoose.Schema({
 subjectSchema.index({ schoolId: 1 });
 subjectSchema.index({ teacherId: 1 });
 subjectSchema.index({ classId: 1 });
-// Allow same subject name in different classes but not within the same class
-subjectSchema.index({ name: 1, classId: 1, schoolId: 1 }, { unique: true, sparse: true });
+// Allow same subject name with different teachers in the same class
+// Unique constraint: name + classId + teacherId + schoolId
+subjectSchema.index({ name: 1, classId: 1, teacherId: 1, schoolId: 1 }, { unique: true, sparse: true });
 // Allow same subject code in different classes but not within the same class
 subjectSchema.index({ code: 1, classId: 1, schoolId: 1 }, { unique: true, sparse: true });
 
 // Static method to get subjects by school
 subjectSchema.statics.getSubjectsBySchool = function(schoolId) {
-  return this.find({ schoolId, status: 'active' }).populate('teacherId', 'name email');
+  return this.find({ schoolId }).populate('teacherId', 'name email');
 };
 
 // Static method to get subjects by teacher
 subjectSchema.statics.getSubjectsByTeacher = function(teacherId) {
-  return this.find({ teacherId, status: 'active' }).populate('classId', 'name section');
+  return this.find({ teacherId }).populate('classId', 'name section');
 };
 
 module.exports = mongoose.model('Subject', subjectSchema);
