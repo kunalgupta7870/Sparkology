@@ -10,10 +10,15 @@ const {
   getChildTeachers,
   getAllParents
 } = require('../controllers/parentController');
+const { parentLogin } = require('../controllers/studentController');
+const { loginValidation } = require('../middleware/studentValidation');
 
 const router = express.Router();
 
-// All routes are protected
+// Public routes (no authentication required)
+router.post('/login', loginValidation, parentLogin);
+
+// All other routes are protected
 router.use(protect);
 
 // School admin routes

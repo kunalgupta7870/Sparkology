@@ -47,14 +47,27 @@ const getHouses = async (req, res) => {
 // @access  Private (School Admin)
 const getHouse = async (req, res) => {
   try {
+    const mongoose = require('mongoose');
     const schoolId = req.user.schoolId;
+    
+    // Convert string to ObjectId if it's a valid ObjectId string
+    let finalSchoolId = schoolId;
+    if (typeof schoolId === 'string' && mongoose.Types.ObjectId.isValid(schoolId)) {
+      finalSchoolId = new mongoose.Types.ObjectId(schoolId);
+    }
+    
+    // Convert house ID to ObjectId if needed
+    let houseId = req.params.id;
+    if (typeof houseId === 'string' && mongoose.Types.ObjectId.isValid(houseId)) {
+      houseId = new mongoose.Types.ObjectId(houseId);
+    }
+    
     const house = await House.findOne({
-      _id: req.params.id,
-      schoolId
+      _id: houseId,
+      schoolId: finalSchoolId
     })
-      .populate('houseCaptain', 'name email rollNumber classId')
-      .populate('viceCaptain', 'name email rollNumber classId')
-      .populate('classId', 'name section');
+      .populate('houseCaptain', 'name email rollNumber')
+      .populate('viceCaptain', 'name email rollNumber');
 
     if (!house) {
       return res.status(404).json({
@@ -69,6 +82,7 @@ const getHouse = async (req, res) => {
       status: 'active'
     })
       .populate('classId', 'name section')
+      .populate('schoolId', 'name code')
       .sort({ name: 1 });
 
     const houseObj = house.toObject();
@@ -83,7 +97,8 @@ const getHouse = async (req, res) => {
     console.error('Get house error:', error);
     res.status(500).json({
       success: false,
-      error: 'Server error while fetching house'
+      error: 'Server error while fetching house',
+      details: error.message
     });
   }
 };

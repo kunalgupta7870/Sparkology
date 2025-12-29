@@ -130,7 +130,7 @@ app.use(compression());
 
 // Serve static files (uploaded documents, avatars, etc.)
 const uploadsStaticPath = path.join(__dirname, 'uploads');
-app.use('/uploads', express.static(uploadsStaticPath));
+app.use('/uploads', express.static('/var/www/Sparkology/uploads'));
 
 // Rate limiting - DISABLED for file uploads
 // const limiter = rateLimit({
@@ -496,7 +496,7 @@ const startServer = async () => {
   // Try to connect to database (non-blocking)
   connectDB();
   
-  server.listen(PORT, () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📊 Environment: ${process.env.NODE_ENV}`);
     console.log(`🌐 Health check: http://localhost:${PORT}/health`);
