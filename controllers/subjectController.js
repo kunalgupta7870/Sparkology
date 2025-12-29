@@ -2,13 +2,13 @@ const Subject = require('../models/Subject');
 const User = require('../models/User');
 const { validationResult } = require('express-validator');
 
-// @desc    Get all subjects
-// @route   GET /api/subjects
-// @access  Private (School Admin)
+/* ================================
+   GET ALL SUBJECTS
+================================ */
 const getSubjects = async (req, res) => {
   try {
     const schoolId = req.user.schoolId;
-    
+
     const subjects = await Subject.find({ schoolId })
       .populate('teacherId', 'name email')
       .populate('classId', 'name section')
@@ -28,16 +28,16 @@ const getSubjects = async (req, res) => {
   }
 };
 
-// @desc    Get subject by ID
-// @route   GET /api/subjects/:id
-// @access  Private (School Admin)
+/* ================================
+   GET SINGLE SUBJECT
+================================ */
 const getSubject = async (req, res) => {
   try {
     const schoolId = req.user.schoolId;
-    
-    const subject = await Subject.findOne({ 
+
+    const subject = await Subject.findOne({
       _id: req.params.id,
-      schoolId 
+      schoolId
     })
       .populate('teacherId', 'name email')
       .populate('classId', 'name section');
@@ -62,12 +62,11 @@ const getSubject = async (req, res) => {
   }
 };
 
-// @desc    Create new subject
-// @route   POST /api/subjects
-// @access  Private (School Admin)
+/* ================================
+   CREATE SUBJECT (MULTI-CLASS)
+================================ */
 const createSubject = async (req, res) => {
   try {
-    // Check for validation errors
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
@@ -77,61 +76,24 @@ const createSubject = async (req, res) => {
       });
     }
 
-    const { name, code, teacherId, classId, type } = req.body;
+    const { name, code, teacherId, classIds, type } = req.body;
     const schoolId = req.user.schoolId;
 
-    // Allow same subject name with different teachers in the same class
-    // Check if exact same subject (name + teacher + class) already exists
-    if (classId && teacherId) {
-      const exactDuplicate = await Subject.findOne({
-        name,
-        classId,
-        teacherId,
-        schoolId
+    if (!name || !Array.isArray(classIds) || classIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Subject name and at least one class are required'
       });
-
-      if (exactDuplicate) {
-        return res.status(400).json({
-          success: false,
-          error: 'This exact subject-teacher-class combination already exists'
-        });
-      }
-    } else if (classId && !teacherId) {
-      // If no teacher specified, check for same name + class without teacher
-      const exactDuplicate = await Subject.findOne({
-        name,
-        classId,
-        teacherId: null,
-        schoolId
-      });
-
-      if (exactDuplicate) {
-        return res.status(400).json({
-          success: false,
-          error: 'Subject with this name already exists in this class without a teacher'
-        });
-      }
     }
 
-    // Check if code already exists in the same class
-    if (code && classId) {
-      const existingCode = await Subject.findOne({
-        code: code.toUpperCase(),
-        classId,
-        schoolId
-      });
-
-      if (existingCode) {
-        return res.status(400).json({
-          success: false,
-          error: 'Subject code already exists in this class. Please use a different code.'
-        });
-      }
-    }
-
-    // Verify teacher exists and belongs to the school
+    // Validate teacher
     if (teacherId) {
-      const teacher = await User.findOne({ _id: teacherId, schoolId, role: 'teacher' });
+      const teacher = await User.findOne({
+        _id: teacherId,
+        schoolId,
+        role: 'teacher'
+      });
+
       if (!teacher) {
         return res.status(400).json({
           success: false,
@@ -140,41 +102,54 @@ const createSubject = async (req, res) => {
       }
     }
 
-    // Create subject
-    const subject = await Subject.create({
-      name,
-      code: code ? code.toUpperCase() : name.substring(0, 3).toUpperCase(),
-      teacherId: teacherId || null,
-      schoolId,
-      classId: classId || null,
-      type: type || 'core',
-      createdBy: req.user._id
-    });
+    const createdSubjects = [];
 
-    // Populate the created subject
-    await subject.populate('teacherId', 'name email');
-    await subject.populate('classId', 'name section');
+    for (const clsId of classIds) {
+      // Prevent exact duplicate
+      const exists = await Subject.findOne({
+        name,
+        classId: clsId,
+        teacherId: teacherId || null,
+        schoolId
+      });
+
+      if (exists) continue;
+
+      const subject = await Subject.create({
+        name,
+        code: code
+          ? code.toUpperCase()
+          : name.substring(0, 3).toUpperCase(),
+        teacherId: teacherId || null,
+        classId: clsId,
+        schoolId,
+        type: type || 'core',
+        createdBy: req.user._id
+      });
+
+      createdSubjects.push(subject);
+    }
 
     res.status(201).json({
       success: true,
-      message: 'Subject created successfully',
-      data: subject
+      message: 'Subjects created successfully',
+      count: createdSubjects.length,
+      data: createdSubjects
     });
   } catch (error) {
     console.error('Create subject error:', error);
     res.status(500).json({
       success: false,
-      error: 'Server error during subject creation'
+      error: error.message
     });
   }
 };
 
-// @desc    Update subject
-// @route   PUT /api/subjects/:id
-// @access  Private (School Admin)
+/* ================================
+   UPDATE SUBJECT (SINGLE CLASS)
+================================ */
 const updateSubject = async (req, res) => {
   try {
-    // Check for validation errors
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
@@ -185,11 +160,10 @@ const updateSubject = async (req, res) => {
     }
 
     const schoolId = req.user.schoolId;
-    const { name, classId, teacherId } = req.body;
-    
-    const subject = await Subject.findOne({ 
+
+    const subject = await Subject.findOne({
       _id: req.params.id,
-      schoolId 
+      schoolId
     });
 
     if (!subject) {
@@ -199,40 +173,6 @@ const updateSubject = async (req, res) => {
       });
     }
 
-    // Check for conflicts when updating name/class/teacher
-    if (name && classId && teacherId) {
-      const exactDuplicate = await Subject.findOne({
-        name,
-        classId,
-        teacherId,
-        schoolId,
-        _id: { $ne: req.params.id } // Exclude current subject
-      });
-
-      if (exactDuplicate) {
-        return res.status(400).json({
-          success: false,
-          error: 'This exact subject-teacher-class combination already exists'
-        });
-      }
-    } else if (name && classId && !teacherId) {
-      const exactDuplicate = await Subject.findOne({
-        name,
-        classId,
-        teacherId: null,
-        schoolId,
-        _id: { $ne: req.params.id }
-      });
-
-      if (exactDuplicate) {
-        return res.status(400).json({
-          success: false,
-          error: 'Subject with this name already exists in this class without a teacher'
-        });
-      }
-    }
-
-    // Update subject
     const updatedSubject = await Subject.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -250,21 +190,21 @@ const updateSubject = async (req, res) => {
     console.error('Update subject error:', error);
     res.status(500).json({
       success: false,
-      error: 'Server error during subject update'
+      error: error.message
     });
   }
 };
 
-// @desc    Delete subject (hard delete)
-// @route   DELETE /api/subjects/:id
-// @access  Private (School Admin)
+/* ================================
+   DELETE SUBJECT
+================================ */
 const deleteSubject = async (req, res) => {
   try {
     const schoolId = req.user.schoolId;
-    
-    const subject = await Subject.findOne({ 
+
+    const subject = await Subject.findOne({
       _id: req.params.id,
-      schoolId 
+      schoolId
     });
 
     if (!subject) {
@@ -274,7 +214,6 @@ const deleteSubject = async (req, res) => {
       });
     }
 
-    // Hard delete - remove from database
     await Subject.findByIdAndDelete(req.params.id);
 
     res.status(200).json({
@@ -290,17 +229,19 @@ const deleteSubject = async (req, res) => {
   }
 };
 
-// @desc    Assign subject to teacher
-// @route   PUT /api/subjects/:id/assign-teacher
-// @access  Private (School Admin)
+/* ================================
+   ASSIGN TEACHER TO SUBJECT
+================================ */
 const assignSubjectTeacher = async (req, res) => {
   try {
     const { teacherId } = req.body;
-    const subjectId = req.params.id;
     const schoolId = req.user.schoolId;
 
-    // Find the subject
-    const subject = await Subject.findOne({ _id: subjectId, schoolId });
+    const subject = await Subject.findOne({
+      _id: req.params.id,
+      schoolId
+    });
+
     if (!subject) {
       return res.status(404).json({
         success: false,
@@ -308,9 +249,13 @@ const assignSubjectTeacher = async (req, res) => {
       });
     }
 
-    // Verify teacher exists and belongs to the school
     if (teacherId) {
-      const teacher = await User.findOne({ _id: teacherId, schoolId, role: 'teacher' });
+      const teacher = await User.findOne({
+        _id: teacherId,
+        schoolId,
+        role: 'teacher'
+      });
+
       if (!teacher) {
         return res.status(400).json({
           success: false,
@@ -319,23 +264,24 @@ const assignSubjectTeacher = async (req, res) => {
       }
     }
 
-    // Update subject's teacher
     const updatedSubject = await Subject.findByIdAndUpdate(
-      subjectId,
+      req.params.id,
       { teacherId: teacherId || null },
       { new: true, runValidators: true }
-    ).populate('teacherId', 'name email').populate('classId', 'name section');
+    )
+      .populate('teacherId', 'name email')
+      .populate('classId', 'name section');
 
     res.status(200).json({
       success: true,
-      message: 'Subject assigned to teacher successfully',
+      message: 'Teacher assigned successfully',
       data: updatedSubject
     });
   } catch (error) {
-    console.error('Assign subject to teacher error:', error);
+    console.error('Assign subject teacher error:', error);
     res.status(500).json({
       success: false,
-      error: 'Server error during subject assignment'
+      error: error.message
     });
   }
 };
@@ -348,4 +294,3 @@ module.exports = {
   deleteSubject,
   assignSubjectTeacher
 };
-
